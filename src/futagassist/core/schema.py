@@ -21,6 +21,16 @@ class FunctionInfo(BaseModel):
     context: str = ""
 
 
+class UsageContext(BaseModel):
+    """Ordered sequence of function calls (usage context) for fuzz target generation."""
+
+    name: str = ""
+    calls: list[str] = Field(default_factory=list, description="Function names in call order")
+    source_file: str = ""
+    source_line: int = 0
+    description: str = ""
+
+
 class CrashInfo(BaseModel):
     """Information about a fuzzer crash."""
 
@@ -84,6 +94,7 @@ class PipelineContext(BaseModel):
     db_path: Path | None = None
     language: str = "cpp"
     functions: list[FunctionInfo] = Field(default_factory=list)
+    usage_contexts: list[UsageContext] = Field(default_factory=list)
     fuzz_targets_dir: Path | None = None
     binaries_dir: Path | None = None
     results_dir: Path | None = None
@@ -99,6 +110,8 @@ class PipelineContext(BaseModel):
                 self.db_path = result.data["db_path"]
             if "functions" in result.data:
                 self.functions = result.data["functions"]
+            if "usage_contexts" in result.data:
+                self.usage_contexts = result.data["usage_contexts"]
             if "fuzz_targets_dir" in result.data:
                 self.fuzz_targets_dir = result.data["fuzz_targets_dir"]
             if "binaries_dir" in result.data:
@@ -113,6 +126,7 @@ class PipelineContext(BaseModel):
             stage_results=self.stage_results,
             db_path=self.db_path,
             functions=self.functions,
+            usage_contexts=self.usage_contexts,
             fuzz_targets_dir=self.fuzz_targets_dir,
             binaries_dir=self.binaries_dir,
             fuzz_results=self.fuzz_results,
@@ -128,6 +142,7 @@ class PipelineResult(BaseModel):
     stage_results: list[StageResult] = Field(default_factory=list)
     db_path: Path | None = None
     functions: list[FunctionInfo] = Field(default_factory=list)
+    usage_contexts: list[UsageContext] = Field(default_factory=list)
     fuzz_targets_dir: Path | None = None
     binaries_dir: Path | None = None
     fuzz_results: list[FuzzResult] = Field(default_factory=list)

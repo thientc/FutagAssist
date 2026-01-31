@@ -235,3 +235,100 @@ def test_cli_build_interactive_accept_fix_retries(runner: CliRunner, tmp_path: P
     assert "CodeQL database" in result.output
     assert call_count == 2
     mock_run.assert_called_once()
+
+
+def test_cli_analyze_requires_db(runner: CliRunner) -> None:
+    """analyze command requires --db."""
+    result = runner.invoke(main, ["analyze"], catch_exceptions=False)
+    assert result.exit_code != 0
+
+
+def test_cli_analyze_no_language_analyzer_fails(runner: CliRunner, tmp_path: Path) -> None:
+    """analyze with valid db but no language analyzer registered exits 1."""
+    (tmp_path / "codeql-db").mkdir()
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            main,
+            ["analyze", "--db", str(tmp_path / "codeql-db")],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 1
+    assert "language" in result.output.lower() or "analyzer" in result.output.lower()
+
+
+def test_cli_analyze_with_plugin_succeeds(runner: CliRunner, tmp_path: Path) -> None:
+    """analyze with plugin that registers a language analyzer succeeds and prints function count."""
+    (tmp_path / "codeql-db").mkdir()
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    plugins_dir = tmp_path / "plugins" / "languages"
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / "mock_analyzer.py").write_text("""
+from pathlib import Path
+from futagassist.core.schema import FunctionInfo
+
+class MockAnalyzer:
+    language = "cpp"
+    def get_codeql_queries(self): return []
+    def extract_functions(self, db_path):
+        return [
+            FunctionInfo(name="f", signature="void f()"),
+        ]
+    def extract_usage_contexts(self, db_path): return []
+    def generate_harness_template(self, func): return ""
+    def get_compiler_flags(self): return []
+
+def register(registry):
+    registry.register_language("cpp", MockAnalyzer)
+""")
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            main,
+            ["analyze", "--db", str(tmp_path / "codeql-db"), "--language", "cpp"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0, result.output
+    assert "Analyzed" in result.output
+    assert "function" in result.output.lower()
+
+
+def test_cli_analyze_with_output_writes_json(runner: CliRunner, tmp_path: Path) -> None:
+    """analyze --output writes JSON file."""
+    (tmp_path / "codeql-db").mkdir()
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    out_json = tmp_path / "out" / "functions.json"
+    plugins_dir = tmp_path / "plugins" / "languages"
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / "mock_analyzer.py").write_text("""
+from futagassist.core.schema import FunctionInfo
+
+class MockAnalyzer:
+    language = "cpp"
+    def get_codeql_queries(self): return []
+    def extract_functions(self, db_path): return [FunctionInfo(name="g", signature="int g()")]
+    def extract_usage_contexts(self, db_path): return []
+    def generate_harness_template(self, func): return ""
+    def get_compiler_flags(self): return []
+
+def register(registry):
+    registry.register_language("cpp", MockAnalyzer)
+""")
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            main,
+            [
+                "analyze",
+                "--db", str(tmp_path / "codeql-db"),
+                "--output", str(out_json),
+                "--language", "cpp",
+            ],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0
+    assert out_json.is_file()
+    import json
+    data = json.loads(out_json.read_text())
+    assert "functions" in data
+    assert len(data["functions"]) == 1
+    assert data["functions"][0]["name"] == "g"
+    assert "usage_contexts" in data

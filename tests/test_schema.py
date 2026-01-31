@@ -9,6 +9,7 @@ from futagassist.core.schema import (
     PipelineContext,
     PipelineResult,
     StageResult,
+    UsageContext,
 )
 
 
@@ -23,6 +24,20 @@ def test_pipeline_context_update_merges_data() -> None:
     )
     assert ctx.db_path == Path("/tmp/codeql-db")
     assert len(ctx.stage_results) == 1
+
+
+def test_pipeline_context_update_merges_usage_contexts() -> None:
+    ctx = PipelineContext()
+    uc = UsageContext(name="seq", calls=["a", "b", "c"])
+    ctx.update(
+        StageResult(
+            stage_name="analyze",
+            success=True,
+            data={"functions": [], "usage_contexts": [uc]},
+        )
+    )
+    assert len(ctx.usage_contexts) == 1
+    assert ctx.usage_contexts[0].calls == ["a", "b", "c"]
 
 
 def test_pipeline_context_finalize() -> None:
@@ -47,3 +62,16 @@ def test_function_info_model() -> None:
     )
     assert f.name == "foo"
     assert f.line == 10
+
+
+def test_usage_context_model() -> None:
+    u = UsageContext(
+        name="init_use_cleanup",
+        calls=["init", "use", "cleanup"],
+        source_file="main.c",
+        source_line=42,
+        description="Typical usage sequence",
+    )
+    assert u.name == "init_use_cleanup"
+    assert u.calls == ["init", "use", "cleanup"]
+    assert u.source_line == 42

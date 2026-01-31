@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from futagassist.core.schema import FunctionInfo
+from futagassist.core.schema import FunctionInfo, UsageContext
 
 
 class LanguageAnalyzer(Protocol):
@@ -19,6 +19,10 @@ class LanguageAnalyzer(Protocol):
 
     def extract_functions(self, db_path: Path) -> list[FunctionInfo]:
         """Extract function information from a CodeQL database."""
+        ...
+
+    def extract_usage_contexts(self, db_path: Path) -> list[UsageContext]:
+        """Extract usage contexts (ordered function-call sequences) from the database."""
         ...
 
     def generate_harness_template(self, func: FunctionInfo) -> str:

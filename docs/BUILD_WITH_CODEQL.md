@@ -137,7 +137,7 @@ When a build fails, the CLI prints:
 
 After a database is created:
 
-- **Analyze** it (when the analyze stage is implemented) to extract function info for fuzz-target generation.
+- **Analyze** it with `futagassist analyze --db <path>` to extract function info for fuzz-target generation. An LLM (if configured) can suggest additional usage contexts for fuzz targets; see [ANALYZE_STAGE.md](ANALYZE_STAGE.md).
 - Use the **CodeQL CLI** directly, e.g. `codeql database analyze <db-path> <query-pack>`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline (build → analyze → generate → compile → fuzz → report). The build stage does not install the library; a future **Fuzz Build** stage will build and install an instrumented library (debug + sanitizers) for fuzzing; see [FUZZ_BUILD_STAGE.md](FUZZ_BUILD_STAGE.md).

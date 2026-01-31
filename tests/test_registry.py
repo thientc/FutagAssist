@@ -50,6 +50,9 @@ class _MockLanguage(LanguageAnalyzer):
     def extract_functions(self, db_path):
         return []
 
+    def extract_usage_contexts(self, db_path):
+        return []
+
     def generate_harness_template(self, func: FunctionInfo) -> str:
         return ""
 

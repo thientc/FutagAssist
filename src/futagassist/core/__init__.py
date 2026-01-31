@@ -14,6 +14,7 @@ from futagassist.core.schema import (
     PipelineResult,
     PluginInfo,
     StageResult,
+    UsageContext,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "PluginInfo",
     "PluginLoader",
     "StageResult",
+    "UsageContext",
 ]

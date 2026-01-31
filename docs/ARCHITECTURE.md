@@ -391,8 +391,9 @@ futagassist run --repo <url> --llm ollama --fuzzer aflpp --language python
   - Public API functions
   - Function call graphs
   - Memory allocation patterns
+- **Optional LLM**: when configured, the stage can ask the LLM to suggest additional usage contexts (ordered function-call sequences) from function names and optional code; same best-effort pattern as build (no LLM or failure = analyzer output only)
 - Export results via `Reporter` plugins
-- Output: `FunctionInfo` list
+- Output: `FunctionInfo` list and `UsageContext` list
 
 ### Feature 4: Generation Stage (`futagassist generate` / `GenerateStage`)
 

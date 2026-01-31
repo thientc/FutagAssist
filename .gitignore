@@ -209,6 +209,9 @@ __marimo__/
 # FutagAssist: downloaded project sources 
 libs/
 
+# FutagAssist: include build package (exception to generic build/ ignore)
+!src/futagassist/build/
+
 
 # FutagAssist: default extract destination (DB, codeql-out, schema per lib)
 .agents/futagassist_architecture_1df0e747.plan.md:Zone.Identifier

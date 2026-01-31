@@ -14,6 +14,7 @@ from futagassist.core.health import HealthChecker, HealthCheckResult
 from futagassist.core.plugin_loader import PluginLoader
 from futagassist.core.registry import ComponentRegistry
 from futagassist.core.schema import PipelineContext
+from futagassist.reporters import register_builtin_reporters
 from futagassist.stages import register_builtin_stages
 
 
@@ -34,6 +35,7 @@ def _load_env_and_plugins(project_root: Path | None = None) -> tuple[ConfigManag
     config.load()
     registry = ComponentRegistry()
     register_builtin_stages(registry)
+    register_builtin_reporters(registry)
     root = project_root or config.project_root
     if (plugins_path := root / "plugins").exists():
         loader = PluginLoader([plugins_path], registry)
@@ -174,6 +176,34 @@ def build(
                 click.echo(f"Build log: {result.data['build_log_file']}", err=True)
 
     raise SystemExit(1)
+
+
+@main.command()
+@click.option("--db", "db_path", required=True, type=click.Path(path_type=Path, exists=True), help="Path to CodeQL database (from build stage).")
+@click.option("--output", "output_path", type=click.Path(path_type=Path), help="Write function list to this JSON file.")
+@click.option("--language", default="cpp", help="Language for analysis (default: cpp).")
+def analyze(db_path: Path, output_path: Path | None, language: str) -> None:
+    """Extract function info from CodeQL database (delegates to LanguageAnalyzer)."""
+    config, registry = _load_env_and_plugins()
+    ctx = PipelineContext(
+        repo_path=None,
+        db_path=db_path.resolve(),
+        language=language,
+        config={
+            "registry": registry,
+            "config_manager": config,
+            "analyze_output": str(output_path.resolve()) if output_path else None,
+        },
+    )
+    stage = registry.get_stage("analyze")
+    result = stage.execute(ctx)
+    if not result.success:
+        click.echo(result.message or "Analysis failed.", err=True)
+        raise SystemExit(1)
+    n = len(result.data.get("functions", []))
+    click.echo(f"Analyzed {n} function(s).")
+    if result.data.get("analyze_output"):
+        click.echo(f"Wrote {result.data['analyze_output']}")
 
 
 if __name__ == "__main__":
