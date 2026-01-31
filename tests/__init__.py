@@ -1,0 +1,1 @@
+"""FutagAssist test suite."""
