@@ -79,7 +79,7 @@ class BuildStage:
             )
 
             overwrite = context.config.get("build_overwrite", False)
-            success, result_db, message = orchestrator.build(
+            success, result_db, message, suggested_fix_cmd = orchestrator.build(
                 repo_path=Path(repo_path),
                 db_path=Path(db_path) if db_path else None,
                 language=language,
@@ -114,6 +114,8 @@ class BuildStage:
         fail_data: dict = {
             "build_log_file": str(log_file),
         }
+        if suggested_fix_cmd is not None:
+            fail_data["suggested_fix_command"] = suggested_fix_cmd
         return StageResult(
             stage_name=self.name,
             success=False,

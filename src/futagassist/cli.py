@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -13,6 +15,11 @@ from futagassist.core.plugin_loader import PluginLoader
 from futagassist.core.registry import ComponentRegistry
 from futagassist.core.schema import PipelineContext
 from futagassist.stages import register_builtin_stages
+
+
+def _is_build_interactive(no_interactive: bool) -> bool:
+    """True if build command should prompt (e.g. for suggested fix). Used so tests can override."""
+    return sys.stdin.isatty() and not no_interactive
 
 
 def _load_env_and_plugins(project_root: Path | None = None) -> tuple[ConfigManager, ComponentRegistry]:
@@ -88,6 +95,7 @@ def plugins_list() -> None:
 @click.option("--log-file", "build_log_file", type=click.Path(path_type=Path), help="Write build-stage log to this file (default: <repo>/futagassist-build.log).")
 @click.option("--verbose", "-v", "build_verbose", is_flag=True, help="Verbose build log (DEBUG level, includes full LLM prompts/responses).")
 @click.option("--build-script", "build_script", type=click.Path(path_type=Path), help="Use this script as the build command with CodeQL (run from repo root; overrides auto-extracted build). Path relative to --repo if not absolute; script should be executable.")
+@click.option("--no-interactive", "no_interactive", is_flag=True, help="Never prompt (e.g. in CI); on failure with a suggested fix, print and exit without asking to run it.")
 def build(
     repo_path: Path,
     db_path: Path | None,
@@ -96,6 +104,7 @@ def build(
     build_log_file: Path | None,
     build_verbose: bool,
     build_script: Path | None,
+    no_interactive: bool,
 ) -> None:
     """Build project and create CodeQL database (README analysis + CodeQL wrapper)."""
     config, registry = _load_env_and_plugins()
@@ -115,16 +124,56 @@ def build(
     stage = registry.get_stage("build")
     result = stage.execute(ctx)
     if result.success and result.data.get("db_path"):
+        click.echo("Build succeeded.")
         click.echo(f"CodeQL database: {result.data['db_path']}")
         if result.data.get("build_log_file"):
             click.echo(f"Build log: {result.data['build_log_file']}")
-    else:
-        click.echo("Build failed.", err=True)
-        if result.message:
-            click.echo(result.message, err=True)
-        if result.data and result.data.get("build_log_file"):
-            click.echo(f"Build log: {result.data['build_log_file']}", err=True)
-        raise SystemExit(1)
+        return
+
+    # Build failed
+    click.echo("Build failed.", err=True)
+    if result.message:
+        click.echo(result.message, err=True)
+    if result.data and result.data.get("build_log_file"):
+        click.echo(f"Build log: {result.data['build_log_file']}", err=True)
+
+    suggested_fix = result.data.get("suggested_fix_command") if result.data else None
+    interactive = _is_build_interactive(no_interactive)
+
+    if suggested_fix and interactive:
+        if "sudo" in suggested_fix:
+            click.echo("Warning: suggested command contains 'sudo'.", err=True)
+        if click.confirm("Run this fix and retry build?", default=False):
+            try:
+                run = subprocess.run(
+                    suggested_fix,
+                    shell=True,
+                    cwd=str(repo_path.resolve()),
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if run.returncode != 0 and run.stderr:
+                    click.echo(run.stderr, err=True)
+            except subprocess.TimeoutExpired:
+                click.echo("Fix command timed out (120s).", err=True)
+            except Exception as e:
+                click.echo(f"Fix command failed: {e}", err=True)
+            # Retry build once (whether fix succeeded or not)
+            result = stage.execute(ctx)
+            if result.success and result.data.get("db_path"):
+                click.echo("Build succeeded.")
+                click.echo(f"CodeQL database: {result.data['db_path']}")
+                if result.data.get("build_log_file"):
+                    click.echo(f"Build log: {result.data['build_log_file']}")
+                return
+            click.echo("Build failed after retry.", err=True)
+            if result.message:
+                click.echo(result.message, err=True)
+            if result.data and result.data.get("build_log_file"):
+                click.echo(f"Build log: {result.data['build_log_file']}", err=True)
+
+    raise SystemExit(1)
 
 
 if __name__ == "__main__":

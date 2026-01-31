@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 from futagassist.cli import main
+from futagassist.core.schema import StageResult
 
 
 @pytest.fixture
@@ -162,3 +164,74 @@ def test_cli_build_accepts_build_script(runner: CliRunner, tmp_path: Path) -> No
         assert result.exit_code in (0, 1, 2)
         if result.exit_code == 2:
             assert "not found" in result.output.lower() or "Build script" in result.output
+
+
+def test_cli_build_no_interactive_exits_without_prompt_on_suggested_fix(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """With --no-interactive and a suggested fix, build exits 1 without prompting."""
+    (tmp_path / "README").write_text("make")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    fail_result = StageResult(
+        stage_name="build",
+        success=False,
+        message="Build failed.\nSuggested fix (run manually if you agree): 'apt install foo'",
+        data={
+            "suggested_fix_command": "apt install foo",
+            "build_log_file": str(tmp_path / "futagassist-build.log"),
+        },
+    )
+    with patch("futagassist.stages.build_stage.BuildStage.execute", return_value=fail_result):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(
+                main,
+                ["build", "--repo", str(tmp_path), "--no-interactive"],
+                catch_exceptions=False,
+            )
+    assert result.exit_code == 1
+    assert "Build failed" in result.output or "Suggested fix" in result.output
+    # Should not have prompted (no "Run this fix" in output when we did not pass input)
+    assert "Run this fix" not in result.output or "--no-interactive" in result.output
+
+
+def test_cli_build_interactive_accept_fix_retries(runner: CliRunner, tmp_path: Path) -> None:
+    """When interactive and user accepts, fix is run and build is retried; success on retry."""
+    (tmp_path / "README").write_text("make")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    fail_result = StageResult(
+        stage_name="build",
+        success=False,
+        message="Build failed.",
+        data={
+            "suggested_fix_command": "true",
+            "build_log_file": str(tmp_path / "futagassist-build.log"),
+        },
+    )
+    success_result = StageResult(
+        stage_name="build",
+        success=True,
+        message="",
+        data={"db_path": str(tmp_path / "codeql-db"), "build_log_file": str(tmp_path / "futagassist-build.log")},
+    )
+    call_count = 0
+
+    def mock_execute(ctx):
+        nonlocal call_count
+        call_count += 1
+        return fail_result if call_count == 1 else success_result
+
+    with patch("futagassist.stages.build_stage.BuildStage.execute", side_effect=mock_execute):
+        with patch("futagassist.cli._is_build_interactive", return_value=True):
+            with patch("futagassist.cli.click.confirm", return_value=True):
+                with patch("futagassist.cli.subprocess.run") as mock_run:
+                    mock_run.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+                    with runner.isolated_filesystem(temp_dir=tmp_path):
+                        result = runner.invoke(
+                            main,
+                            ["build", "--repo", str(tmp_path)],
+                            catch_exceptions=False,
+                        )
+    assert result.exit_code == 0, result.output
+    assert "CodeQL database" in result.output
+    assert call_count == 2
+    mock_run.assert_called_once()

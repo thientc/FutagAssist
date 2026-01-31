@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -117,3 +118,25 @@ def test_build_stage_execute_success_includes_build_log_file(tmp_path: Path) -> 
     if result.success:
         assert result.data and "build_log_file" in result.data
         assert result.data.get("db_path") is not None
+
+
+def test_build_stage_failure_includes_suggested_fix_command(tmp_path: Path) -> None:
+    """On failure with suggested fix, result.data includes suggested_fix_command."""
+    (tmp_path / "README").write_text("make")
+    registry = ComponentRegistry()
+    from futagassist.core.config import ConfigManager
+    config_mgr = ConfigManager(project_root=tmp_path)
+    config_mgr._config_path = tmp_path / "nonexistent.yaml"
+    config_mgr.load()
+
+    ctx = PipelineContext(
+        repo_path=tmp_path,
+        config={"registry": registry, "config_manager": config_mgr},
+    )
+    stage = BuildStage()
+    with patch("futagassist.build.build_orchestrator.BuildOrchestrator.build") as m:
+        m.return_value = (False, None, "Build failed", "libtoolize && autoreconf -fi")
+        result = stage.execute(ctx)
+    assert result.success is False
+    assert result.data is not None
+    assert result.data.get("suggested_fix_command") == "libtoolize && autoreconf -fi"

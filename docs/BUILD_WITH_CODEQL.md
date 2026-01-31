@@ -17,7 +17,7 @@ This guide explains how to use FutagAssist to build a C, C++, or Python library 
 ## Command
 
 ```bash
-futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--overwrite] [--build-script <PATH>] [--log-file <PATH>] [-v|--verbose]
+futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--overwrite] [--build-script <PATH>] [--log-file <PATH>] [--no-interactive] [-v|--verbose]
 ```
 
 | Option      | Description |
@@ -28,6 +28,7 @@ futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--over
 | `--overwrite` | If the database path already exists, pass CodeQL’s `--overwrite` to replace it. |
 | `--build-script` | Use this script as the build command with CodeQL (run from repo root; **overrides** auto-extracted build). Path relative to `--repo` if not absolute. The script should be executable (`chmod +x`). |
 | `--log-file` | Write the build-stage log to this file. Default: `<repo>/futagassist-build.log`. |
+| `--no-interactive` | Never prompt; on failure with a suggested fix, print and exit without asking to run it (e.g. for CI). |
 | `--verbose` / `-v` | Verbose build log (DEBUG level): full LLM prompts and responses, CodeQL command, etc. |
 
 ## What happens
@@ -42,7 +43,7 @@ futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--over
    - The build runs from the repo root; the database is written to `--output` (or `<repo>/codeql-db`).
 
 3. **Failure handling**
-   - If the build fails and an LLM is configured, FutagAssist asks for a single fix command (e.g. install a package) and prints it for you to run manually; it does not run the command automatically (so you can review commands that use `sudo` or other privileged operations).
+   - If the build fails and an LLM is configured, FutagAssist asks for a single fix command (e.g. install a package) and prints it. In **interactive** mode (stdin is a TTY and you did not pass `--no-interactive`), the CLI may prompt: *Run this fix and retry build? [y/N]*. If you answer yes, it runs the fix command in the repo root and retries the build once. If you answer no, or if you use `--no-interactive` (e.g. in CI), it exits with an error and the last build log is shown; you can run the suggested command manually and re-run `futagassist build`.
    - If all retries fail or no LLM is configured, the command exits with an error and the last build log is shown.
 
 4. **Build log**
@@ -102,7 +103,7 @@ On failure without an LLM, FutagAssist prints the build output and a hint that y
 When a build fails, the CLI prints:
 - **Build command** — the command that was run (or the wrapper script path).
 - **Error output** — CodeQL/build stderr and stdout.
-- **LLM suggestion** — if an LLM is configured, the suggested fix command is shown as "Suggested fix (run manually if you agree): …"; FutagAssist does not run it. Or “none (no fix suggested)” if the LLM had no fix; or **“request failed (&lt;error&gt;)”** if the LLM API call failed (e.g. `Connection error`). In that case, check your API key, network, proxy, and `OPENAI_BASE_URL` (or LLM config) in `.env`; the build log (`futagassist-build.log`) also records `LLM fix request failed: <error>`.
+- **LLM suggestion** — if an LLM is configured, the suggested fix command is shown as "Suggested fix (run manually if you agree): …"; FutagAssist does not run it. Or “no suggestion line is printed” if the LLM had no fix; or **“request failed (&lt;error&gt;)”** if the LLM API call failed (e.g. `Connection error`). In that case, check your API key, network, proxy, and `OPENAI_BASE_URL` (or LLM config) in `.env`; the build log (`futagassist-build.log`) also records `LLM fix request failed: <error>`.
 
 ## Troubleshooting
 

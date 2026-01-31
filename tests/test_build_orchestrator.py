@@ -43,7 +43,7 @@ def test_build_orchestrator_format_failure_message_includes_llm_suggestion() -> 
 
 
 def test_build_orchestrator_format_failure_message_none_suggestion() -> None:
-    """_format_failure_message includes 'none' when LLM suggests no fix."""
+    """_format_failure_message omits 'LLM suggestion: none' when LLM suggests no fix (keep output focused)."""
     class MockLLM:
         name = "mock"
 
@@ -54,7 +54,8 @@ def test_build_orchestrator_format_failure_message_none_suggestion() -> None:
         build_cmd="make",
         llm_suggestion=None,
     )
-    assert "none" in msg.lower() or "no fix" in msg.lower()
+    assert "Build command" in msg and "err" in msg
+    assert "LLM suggestion: none" not in msg and "no fix suggested" not in msg
 
 
 def test_build_orchestrator_format_failure_message_llm_error() -> None:
@@ -125,9 +126,10 @@ def test_build_orchestrator_custom_build_script_not_found(tmp_path: Path) -> Non
     (tmp_path / "README").write_text("make")
     analyzer = ReadmeAnalyzer(llm_provider=None)
     orch = BuildOrchestrator(readme_analyzer=analyzer, codeql_bin="codeql")
-    success, db_path, message = orch.build(tmp_path, build_script="nonexistent.sh")
+    success, db_path, message, suggested_fix = orch.build(tmp_path, build_script="nonexistent.sh")
     assert success is False
     assert db_path is None
+    assert suggested_fix is None
     assert "not found" in message.lower() or "Build script" in message
 
 
@@ -140,8 +142,9 @@ def test_build_orchestrator_custom_build_script_used(tmp_path: Path) -> None:
     orch = BuildOrchestrator(readme_analyzer=analyzer, codeql_bin="codeql")
     with patch("subprocess.run") as m:
         m.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-        success, db_path, message = orch.build(tmp_path, build_script=str(custom_script))
+        success, db_path, message, suggested_fix = orch.build(tmp_path, build_script=str(custom_script))
     assert success is True
+    assert suggested_fix is None
     assert db_path is not None
     # CodeQL was called with the custom script path as --command
     call_args = m.call_args[0][0]
@@ -152,9 +155,10 @@ def test_build_orchestrator_nonexistent_repo() -> None:
     """Non-existent repo returns failure."""
     analyzer = ReadmeAnalyzer(llm_provider=None)
     orch = BuildOrchestrator(readme_analyzer=analyzer, codeql_bin="codeql")
-    success, db_path, message = orch.build(Path("/nonexistent/repo"))
+    success, db_path, message, suggested_fix = orch.build(Path("/nonexistent/repo"))
     assert success is False
     assert db_path is None
+    assert suggested_fix is None
     assert "Not a directory" in message or "nonexistent" in message.lower()
 
 
@@ -166,9 +170,10 @@ def test_build_orchestrator_codeql_not_found(tmp_path: Path) -> None:
         readme_analyzer=analyzer,
         codeql_bin="/nonexistent/codeql",
     )
-    success, db_path, message = orch.build(tmp_path)
+    success, db_path, message, suggested_fix = orch.build(tmp_path)
     assert success is False
     assert db_path is None
+    assert suggested_fix is None
     assert "not found" in message.lower() or "CodeQL" in message or "nonexistent" in message.lower()
 
 
@@ -180,9 +185,28 @@ def test_build_orchestrator_returns_db_path_on_success(tmp_path: Path) -> None:
 
     with patch("subprocess.run") as m:
         m.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-        success, db_path, message = orch.build(tmp_path)
+        success, db_path, message, suggested_fix = orch.build(tmp_path)
 
     assert success is True
     assert db_path is not None
+    assert suggested_fix is None
     assert Path(db_path).name == "codeql-db" or "codeql" in str(db_path)
     assert message == ""
+
+
+def test_build_orchestrator_returns_suggested_fix_on_failure_with_fix(tmp_path: Path) -> None:
+    """When build fails and LLM suggests a fix, fourth return value is the suggested command."""
+    (tmp_path / "README").write_text("make")
+    class MockLLM:
+        name = "mock"
+        def complete(self, prompt: str, **kwargs): return "libtoolize && autoreconf -fi"
+
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    orch = BuildOrchestrator(readme_analyzer=analyzer, llm_provider=MockLLM(), codeql_bin="codeql")
+    with patch("subprocess.run") as m:
+        m.return_value = type("R", (), {"returncode": 1, "stdout": "", "stderr": "LT_PATH_LD: command not found"})()
+        success, db_path, message, suggested_fix = orch.build(tmp_path)
+    assert success is False
+    assert db_path is None
+    assert suggested_fix == "libtoolize && autoreconf -fi"
+    assert "Suggested fix" in message or "libtoolize" in message
