@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# FutagAssist: downloaded project sources 
+libs/
+
+
+# FutagAssist: default extract destination (DB, codeql-out, schema per lib)
+.agents/futagassist_architecture_1df0e747.plan.md:Zone.Identifier
