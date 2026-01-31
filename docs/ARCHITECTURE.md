@@ -247,6 +247,7 @@ FutagAssist/
 │   │   ├── build_stage.py
 │   │   ├── analyze_stage.py
 │   │   ├── generate_stage.py
+│   │   ├── fuzz_build_stage.py   # Future: instrumented library build (see docs/FUZZ_BUILD_STAGE.md)
 │   │   ├── compile_stage.py
 │   │   ├── fuzz_stage.py
 │   │   └── report_stage.py
@@ -338,6 +339,7 @@ pipeline:
     - build
     - analyze
     - generate
+    # - fuzz_build   # Future: add when implementing compile/fuzz; rebuilds library with debug + sanitizers (see FUZZ_BUILD_STAGE.md)
     - compile
     - fuzz
     - report
@@ -430,6 +432,37 @@ Delegates to `Reporter` plugins:
 - **SARIF**: Static Analysis Results Interchange Format
 - **SVRES**: Svace integration (from Futag)
 - **HTML**: Human-readable coverage reports
+
+---
+
+## Future Work: Fuzz Build (Instrumentation) Stage
+
+When implementing the compile and fuzz stages, add a dedicated **Fuzz Build** (instrumentation) stage so the library is built with debug flags and sanitizers for fuzzing and debugging. The current build stage does not install; it only produces a CodeQL database. The planned Fuzz Build stage will build the library with `-g` and sanitizers (AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer) and install to a fuzz-specific prefix (e.g. `<repo>/install-fuzz`). The compile stage will then link fuzz targets against this instrumented install.
+
+- **Placement:** After `generate`, before `compile`. Depends on: `build`.
+- **Responsibility:** Rebuild library with injected `CFLAGS`/`CXXFLAGS`/`LDFLAGS`; install to `fuzz_install_prefix`.
+- **Context:** Publish `context.fuzz_install_prefix`; compile stage uses it when building fuzz targets.
+- **Optional:** Stage is skippable (`--skip fuzz_build`); compile stage falls back to normal `install_prefix` when skipped.
+
+See [FUZZ_BUILD_STAGE.md](FUZZ_BUILD_STAGE.md) for full specification and implementation notes.
+
+```mermaid
+flowchart LR
+    subgraph existing [Current]
+        Build[BuildStage]
+        Analyze[AnalyzeStage]
+        Generate[GenerateStage]
+    end
+    subgraph planned [Planned]
+        FuzzBuild[FuzzBuildStage]
+    end
+    subgraph later [Later stages]
+        Compile[CompileStage]
+        Fuzz[FuzzStage]
+    end
+    Build --> Analyze --> Generate --> FuzzBuild --> Compile --> Fuzz
+    FuzzBuild -.->|fuzz_install_prefix| Compile
+```
 
 ---
 

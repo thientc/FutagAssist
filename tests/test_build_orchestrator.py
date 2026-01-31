@@ -25,7 +25,7 @@ def test_build_orchestrator_write_build_script_creates_executable(tmp_path: Path
 
 
 def test_build_orchestrator_format_failure_message_includes_llm_suggestion() -> None:
-    """_format_failure_message includes error output and LLM suggestion when LLM present."""
+    """_format_failure_message includes error output and suggested fix (run manually) when LLM present."""
     class MockLLM:
         name = "mock"
 
@@ -39,7 +39,7 @@ def test_build_orchestrator_format_failure_message_includes_llm_suggestion() -> 
     assert "make" in msg
     assert "exit 1" in msg
     assert "apt install foo" in msg
-    assert "LLM suggestion" in msg
+    assert "Suggested fix (run manually if you agree)" in msg
 
 
 def test_build_orchestrator_format_failure_message_none_suggestion() -> None:
@@ -57,34 +57,53 @@ def test_build_orchestrator_format_failure_message_none_suggestion() -> None:
     assert "none" in msg.lower() or "no fix" in msg.lower()
 
 
+def test_build_orchestrator_format_failure_message_llm_error() -> None:
+    """_format_failure_message includes LLM request error when API call failed."""
+    class MockLLM:
+        name = "mock"
+
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    orch = BuildOrchestrator(readme_analyzer=analyzer, llm_provider=MockLLM())
+    msg = orch._format_failure_message(
+        error_output="err",
+        build_cmd="make",
+        llm_suggestion=None,
+        llm_error="Connection error.",
+    )
+    assert "Connection error" in msg
+    assert "request failed" in msg.lower() or "failed" in msg.lower()
+
+
 def test_build_orchestrator_ask_llm_for_fix_no_llm_returns_none() -> None:
-    """_ask_llm_for_fix returns None when no LLM configured."""
+    """_ask_llm_for_fix returns (None, None) when no LLM configured."""
     analyzer = ReadmeAnalyzer(llm_provider=None)
     orch = BuildOrchestrator(readme_analyzer=analyzer, llm_provider=None)
-    assert orch._ask_llm_for_fix("make", "error") is None
+    fix, err = orch._ask_llm_for_fix("make", "error")
+    assert fix is None and err is None
 
 
 def test_build_orchestrator_ask_llm_for_fix_returns_command() -> None:
-    """_ask_llm_for_fix returns parsed command when LLM returns one."""
+    """_ask_llm_for_fix returns (parsed_command, None) when LLM returns one."""
     class MockLLM:
         name = "mock"
         def complete(self, prompt: str, **kwargs): return "apt install cmake"
 
     analyzer = ReadmeAnalyzer(llm_provider=None)
     orch = BuildOrchestrator(readme_analyzer=analyzer, llm_provider=MockLLM())
-    fix = orch._ask_llm_for_fix("make", "error")
-    assert fix == "apt install cmake"
+    fix, err = orch._ask_llm_for_fix("make", "error")
+    assert fix == "apt install cmake" and err is None
 
 
 def test_build_orchestrator_ask_llm_for_fix_none_returns_none() -> None:
-    """_ask_llm_for_fix returns None when LLM returns 'none'."""
+    """_ask_llm_for_fix returns (None, None) when LLM returns 'none'."""
     class MockLLM:
         name = "mock"
         def complete(self, prompt: str, **kwargs): return "none"
 
     analyzer = ReadmeAnalyzer(llm_provider=None)
     orch = BuildOrchestrator(readme_analyzer=analyzer, llm_provider=MockLLM())
-    assert orch._ask_llm_for_fix("make", "error") is None
+    fix, err = orch._ask_llm_for_fix("make", "error")
+    assert fix is None and err is None
 
 
 def test_build_orchestrator_run_fix_command_success(tmp_path: Path) -> None:

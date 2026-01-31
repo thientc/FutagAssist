@@ -72,11 +72,24 @@ def test_readme_analyzer_file_based_autogen(tmp_path: Path) -> None:
 
 
 def test_readme_analyzer_file_based_configure_exists(tmp_path: Path) -> None:
-    """Repos with existing configure script get configure && make."""
+    """Repos with existing configure script (no autogen.sh) get configure && make."""
     (tmp_path / "configure").write_text("#!/bin/sh\nexit 0")
     analyzer = ReadmeAnalyzer(llm_provider=None)
     cmds = analyzer.extract_build_commands(tmp_path)
     full = " && ".join(cmds)
+    assert "./configure" in full or "configure" in full
+    assert "make" in full
+
+
+def test_readme_analyzer_file_based_configure_preferred_when_both_exist(tmp_path: Path) -> None:
+    """Repos with both configure and autogen.sh (e.g. libpng) use configure only; autogen.sh can refuse 'partial' trees."""
+    (tmp_path / "configure.ac").write_text("AC_INIT")
+    (tmp_path / "autogen.sh").write_text("#!/bin/sh\nautoreconf -fi")
+    (tmp_path / "configure").write_text("#!/bin/sh\nexit 0")
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    cmds = analyzer.extract_build_commands(tmp_path)
+    full = " && ".join(cmds)
+    assert "autogen" not in full
     assert "./configure" in full or "configure" in full
     assert "make" in full
 

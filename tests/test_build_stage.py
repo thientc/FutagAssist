@@ -117,6 +117,3 @@ def test_build_stage_execute_success_includes_build_log_file(tmp_path: Path) -> 
     if result.success:
         assert result.data and "build_log_file" in result.data
         assert result.data.get("db_path") is not None
-        # Default install prefix is always set for linking stage
-        assert "install_prefix" in result.data
-        assert "install" in str(result.data["install_prefix"]).lower()

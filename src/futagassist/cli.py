@@ -87,7 +87,6 @@ def plugins_list() -> None:
 @click.option("--overwrite", is_flag=True, help="Overwrite existing CodeQL database directory if it exists.")
 @click.option("--log-file", "build_log_file", type=click.Path(path_type=Path), help="Write build-stage log to this file (default: <repo>/futagassist-build.log).")
 @click.option("--verbose", "-v", "build_verbose", is_flag=True, help="Verbose build log (DEBUG level, includes full LLM prompts/responses).")
-@click.option("--install-prefix", "build_install_prefix", type=click.Path(path_type=Path), help="Install library to this directory for linking stage (adds --prefix and make/ninja install). Default: <repo>/install.")
 @click.option("--build-script", "build_script", type=click.Path(path_type=Path), help="Use this script as the build command with CodeQL (run from repo root; overrides auto-extracted build). Path relative to --repo if not absolute; script should be executable.")
 def build(
     repo_path: Path,
@@ -96,7 +95,6 @@ def build(
     overwrite: bool,
     build_log_file: Path | None,
     build_verbose: bool,
-    build_install_prefix: Path | None,
     build_script: Path | None,
 ) -> None:
     """Build project and create CodeQL database (README analysis + CodeQL wrapper)."""
@@ -111,7 +109,6 @@ def build(
             "build_overwrite": overwrite,
             "build_log_file": build_log_file.resolve() if build_log_file else None,
             "build_verbose": build_verbose,
-            "build_install_prefix": build_install_prefix.resolve() if build_install_prefix else None,
             "build_script": str(build_script) if build_script else None,
         },
     )
@@ -119,8 +116,6 @@ def build(
     result = stage.execute(ctx)
     if result.success and result.data.get("db_path"):
         click.echo(f"CodeQL database: {result.data['db_path']}")
-        if result.data.get("install_prefix"):
-            click.echo(f"Install prefix (for linking): {result.data['install_prefix']}")
         if result.data.get("build_log_file"):
             click.echo(f"Build log: {result.data['build_log_file']}")
     else:

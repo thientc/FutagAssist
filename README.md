@@ -26,9 +26,8 @@ futagassist build --repo /path/to/library --output /path/to/codeql-db --language
 
 1. Reads README, INSTALL, BUILD, etc. and extracts build commands (using an LLM if configured, otherwise heuristics).
 2. Wraps the build with `codeql database create --language <lang> --command="<build-cmd>"` and runs it.
-3. On failure, can ask the LLM for a fix command (e.g. install missing deps), run it, and retry (up to 3 times).
+3. On failure, can ask the LLM for a fix command (e.g. install missing deps) and print it for you to run manually; it does not run the command automatically.
 4. Writes the CodeQL database to `--output` or `<repo>/codeql-db`.
-5. Installs the library to `<repo>/install` by default (or `--install-prefix`) for a future **linking stage**; use `--install-prefix <DIR>` to override.
 
 **Example with downloaded projects:**
 

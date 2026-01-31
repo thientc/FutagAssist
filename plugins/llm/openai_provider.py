@@ -39,10 +39,12 @@ class OpenAIProvider:
         client = OpenAI(**client_kwargs)
 
         model = kwargs.get("model") if isinstance(kwargs.get("model"), str) else self._model
+        # Newer OpenAI models use max_completion_tokens; older API used max_tokens.
+        completion_tokens = kwargs.get("max_completion_tokens") or kwargs.get("max_tokens", 2048)
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=kwargs.get("max_tokens", 2048),
+            max_completion_tokens=completion_tokens,
             temperature=kwargs.get("temperature", 0.2),
         )
         if not resp.choices:
@@ -54,7 +56,7 @@ class OpenAIProvider:
         if not self._api_key:
             return False
         try:
-            self.complete("Hi", max_tokens=5)
+            self.complete("Hi", max_completion_tokens=5)
             return True
         except Exception:
             return False

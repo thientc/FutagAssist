@@ -17,7 +17,7 @@ This guide explains how to use FutagAssist to build a C, C++, or Python library 
 ## Command
 
 ```bash
-futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--overwrite] [--install-prefix <PATH>] [--build-script <PATH>] [--log-file <PATH>] [-v|--verbose]
+futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--overwrite] [--build-script <PATH>] [--log-file <PATH>] [-v|--verbose]
 ```
 
 | Option      | Description |
@@ -26,7 +26,6 @@ futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--over
 | `--output` | Where to create the CodeQL database. Default: `<repo>/codeql-db`. |
 | `--language` | CodeQL language: `cpp`, `c`, or `python`. Default: `cpp`. |
 | `--overwrite` | If the database path already exists, pass CodeQL’s `--overwrite` to replace it. |
-| `--install-prefix` | Install the library to this directory for the **linking stage** (adds `--prefix` and `make`/`ninja` install). Default: `<repo>/install`. Override to use a different path. |
 | `--build-script` | Use this script as the build command with CodeQL (run from repo root; **overrides** auto-extracted build). Path relative to `--repo` if not absolute. The script should be executable (`chmod +x`). |
 | `--log-file` | Write the build-stage log to this file. Default: `<repo>/futagassist-build.log`. |
 | `--verbose` / `-v` | Verbose build log (DEBUG level): full LLM prompts and responses, CodeQL command, etc. |
@@ -43,13 +42,10 @@ futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--over
    - The build runs from the repo root; the database is written to `--output` (or `<repo>/codeql-db`).
 
 3. **Failure handling**
-   - If the build fails and an LLM is configured, FutagAssist can ask for a single fix command (e.g. install a package), run it, and retry the build (up to 3 times).
+   - If the build fails and an LLM is configured, FutagAssist asks for a single fix command (e.g. install a package) and prints it for you to run manually; it does not run the command automatically (so you can review commands that use `sudo` or other privileged operations).
    - If all retries fail or no LLM is configured, the command exits with an error and the last build log is shown.
 
-4. **Install prefix (for linking stage)**
-   - The library is **always installed** to a directory so a future **linking stage** (e.g. compiling fuzz targets) can link against it. By default that directory is **`<repo>/install`**. The build command is extended accordingly: autotools use `./configure --prefix=<DIR>`, CMake uses `-DCMAKE_INSTALL_PREFIX=<DIR>`, Meson uses `--prefix=<DIR>`, and the build runs `make install` or `ninja -C build install` after the build. Use `--install-prefix <DIR>` to override the default and install to a different path.
-
-5. **Build log**
+4. **Build log**
    - A build-stage log is written to `<repo>/futagassist-build.log` (or `--log-file`) for every run.
    - The log includes: stage start/params, README analysis (docs gathered, LLM vs heuristic, extracted build command), CodeQL build attempts, full build command, error output on failure, LLM fix prompt and response (and whether a fix was run), and stage result (success/failed).
    - Use `--verbose` to include full LLM prompts/responses and the exact CodeQL command at DEBUG level.
@@ -106,7 +102,7 @@ On failure without an LLM, FutagAssist prints the build output and a hint that y
 When a build fails, the CLI prints:
 - **Build command** — the command that was run (or the wrapper script path).
 - **Error output** — CodeQL/build stderr and stdout.
-- **LLM suggestion** — if an LLM is configured, the suggested fix command (or “none” if no fix was suggested).
+- **LLM suggestion** — if an LLM is configured, the suggested fix command is shown as "Suggested fix (run manually if you agree): …"; FutagAssist does not run it. Or “none (no fix suggested)” if the LLM had no fix; or **“request failed (&lt;error&gt;)”** if the LLM API call failed (e.g. `Connection error`). In that case, check your API key, network, proxy, and `OPENAI_BASE_URL` (or LLM config) in `.env`; the build log (`futagassist-build.log`) also records `LLM fix request failed: <error>`.
 
 ## Troubleshooting
 
@@ -121,7 +117,10 @@ When a build fails, the CLI prints:
   `cd libs/jsoncpp && mkdir -p build && cd build && cmake .. && make`. Fix any missing deps or errors, then run `futagassist build` again.
 
 - **Build fails with missing dependencies**  
-  Install the project’s build deps (e.g. `apt install build-essential cmake libssl-dev`). If an LLM is configured (see above), FutagAssist may suggest and run a fix command; otherwise fix the environment and re-run.
+  Install the project’s build deps (e.g. `apt install build-essential cmake libssl-dev`). If an LLM is configured (see above), FutagAssist may suggest a fix command for you to run manually; otherwise fix the environment and re-run.
+
+- **“LT_PATH_LD: command not found” or “ltmain.sh not found” (autotools)**  
+  The project uses autotools and the build system needs to be **regenerated** with your system’s libtool/autoconf. Installing `libtool autoconf automake` is not enough. From the repo root run: `libtoolize && autoreconf -fi`, then run `futagassist build` again. (Some projects' `autogen.sh` refuses to run on "partial" trees; prefer `libtoolize && autoreconf -fi` for that case.)
 
 - **Wrong build command inferred**  
   The heuristic can be wrong. With an LLM, extraction is usually better. You can also build the project once manually, then run CodeQL yourself:
@@ -130,6 +129,9 @@ When a build fails, the CLI prints:
 - **Language choice**  
   Use `--language c` for C-only projects and `--language cpp` for C++ (or mixed C/C++) so CodeQL uses the right extractor.
 
+- **“LLM suggestion: request failed (Connection error)”**  
+  The LLM is configured but the API call failed (network unreachable, wrong base URL, proxy, or invalid key). Check `.env`: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (if using a proxy or custom endpoint), and `LLM_PROVIDER`. Run `futagassist check` to verify the LLM is reachable. The build log at `<repo>/futagassist-build.log` shows the exact error (e.g. `LLM fix request failed: Connection error`).
+
 ## Next steps
 
 After a database is created:
@@ -137,4 +139,4 @@ After a database is created:
 - **Analyze** it (when the analyze stage is implemented) to extract function info for fuzz-target generation.
 - Use the **CodeQL CLI** directly, e.g. `codeql database analyze <db-path> <query-pack>`.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline (build → analyze → generate → compile → fuzz → report).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pipeline (build → analyze → generate → compile → fuzz → report). The build stage does not install the library; a future **Fuzz Build** stage will build and install an instrumented library (debug + sanitizers) for fuzzing; see [FUZZ_BUILD_STAGE.md](FUZZ_BUILD_STAGE.md).

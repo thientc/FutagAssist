@@ -9,9 +9,6 @@ from futagassist.build.build_orchestrator import BuildOrchestrator
 from futagassist.build.readme_analyzer import ReadmeAnalyzer
 from futagassist.core.schema import PipelineContext, StageResult
 
-# Default install directory relative to repo root; used for linking stage when --install-prefix is not set.
-DEFAULT_INSTALL_DIR = "install"
-
 
 class BuildStage:
     """Pipeline stage that builds the project and creates a CodeQL database."""
@@ -64,13 +61,6 @@ class BuildStage:
             db_path = context.db_path or (Path(repo_path) / "codeql-db")
             log.info("db_path=%s", db_path)
             log.info("language=%s overwrite=%s", language, context.config.get("build_overwrite", False))
-            # Install prefix: explicit from context, or default <repo>/install for linking stage
-            raw_prefix = context.config.get("build_install_prefix")
-            if raw_prefix is not None:
-                install_prefix = str(Path(raw_prefix).resolve())
-            else:
-                install_prefix = str(Path(repo_path).resolve() / DEFAULT_INSTALL_DIR)
-            log.info("install_prefix=%s (for future linking stage)", install_prefix)
             build_script = context.config.get("build_script")
             if build_script is not None:
                 build_script = Path(build_script)
@@ -94,7 +84,7 @@ class BuildStage:
                 db_path=Path(db_path) if db_path else None,
                 language=language,
                 overwrite=overwrite,
-                install_prefix=install_prefix,
+                install_prefix=None,
                 build_script=build_script,
             )
 
@@ -104,7 +94,6 @@ class BuildStage:
                 data: dict = {
                     "db_path": result_db,
                     "build_log_file": str(log_file),
-                    "install_prefix": install_prefix,
                 }
                 return StageResult(
                     stage_name=self.name,
@@ -124,7 +113,6 @@ class BuildStage:
             )
         fail_data: dict = {
             "build_log_file": str(log_file),
-            "install_prefix": install_prefix,
         }
         return StageResult(
             stage_name=self.name,
