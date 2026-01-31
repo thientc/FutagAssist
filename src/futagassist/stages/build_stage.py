@@ -1,0 +1,140 @@
+"""Build stage: create CodeQL database from repo."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from futagassist.build.build_log import build_log_context
+from futagassist.build.build_orchestrator import BuildOrchestrator
+from futagassist.build.readme_analyzer import ReadmeAnalyzer
+from futagassist.core.schema import PipelineContext, StageResult
+
+# Default install directory relative to repo root; used for linking stage when --install-prefix is not set.
+DEFAULT_INSTALL_DIR = "install"
+
+
+class BuildStage:
+    """Pipeline stage that builds the project and creates a CodeQL database."""
+
+    name = "build"
+    depends_on: list[str] = []
+
+    def execute(self, context: PipelineContext) -> StageResult:
+        """Run build with CodeQL wrapper; set context.db_path on success."""
+        repo_path = context.repo_path
+        if repo_path is None:
+            return StageResult(
+                stage_name=self.name,
+                success=False,
+                message="repo_path not set in context",
+            )
+
+        registry = context.config.get("registry")
+        config_manager = context.config.get("config_manager")
+        if not registry or not config_manager:
+            return StageResult(
+                stage_name=self.name,
+                success=False,
+                message="registry or config_manager not set in context.config",
+            )
+
+        cfg = config_manager.config
+        language = context.language or cfg.language
+        codeql_bin = "codeql"
+        if cfg.codeql_home:
+            codeql_bin = str(Path(cfg.codeql_home) / "bin" / "codeql")
+
+        llm = None
+        try:
+            if cfg.llm_provider in registry.list_available().get("llm_providers", []):
+                llm = registry.get_llm(cfg.llm_provider, **config_manager.env)
+        except Exception:
+            pass
+
+        log_file = context.config.get("build_log_file")
+        if log_file is None:
+            log_file = Path(repo_path) / "futagassist-build.log"
+        else:
+            log_file = Path(log_file)
+        verbose = context.config.get("build_verbose", False)
+
+        with build_log_context(log_file, verbose=verbose) as log:
+            log.info("=== Build stage started ===")
+            log.info("repo_path=%s", repo_path)
+            db_path = context.db_path or (Path(repo_path) / "codeql-db")
+            log.info("db_path=%s", db_path)
+            log.info("language=%s overwrite=%s", language, context.config.get("build_overwrite", False))
+            # Install prefix: explicit from context, or default <repo>/install for linking stage
+            raw_prefix = context.config.get("build_install_prefix")
+            if raw_prefix is not None:
+                install_prefix = str(Path(raw_prefix).resolve())
+            else:
+                install_prefix = str(Path(repo_path).resolve() / DEFAULT_INSTALL_DIR)
+            log.info("install_prefix=%s (for future linking stage)", install_prefix)
+            build_script = context.config.get("build_script")
+            if build_script is not None:
+                build_script = Path(build_script)
+                if not build_script.is_absolute():
+                    build_script = Path(repo_path) / build_script
+                build_script = str(build_script.resolve())
+                log.info("build_script=%s (custom)", build_script)
+            log.info("LLM configured=%s", llm is not None)
+
+            analyzer = ReadmeAnalyzer(llm_provider=llm)
+            orchestrator = BuildOrchestrator(
+                readme_analyzer=analyzer,
+                llm_provider=llm,
+                codeql_bin=codeql_bin,
+                max_retries=cfg.llm.max_retries,
+            )
+
+            overwrite = context.config.get("build_overwrite", False)
+            success, result_db, message = orchestrator.build(
+                repo_path=Path(repo_path),
+                db_path=Path(db_path) if db_path else None,
+                language=language,
+                overwrite=overwrite,
+                install_prefix=install_prefix,
+                build_script=build_script,
+            )
+
+            if success and result_db is not None:
+                log.info("=== Build stage finished: success ===")
+                log.info("CodeQL database: %s", result_db)
+                data: dict = {
+                    "db_path": result_db,
+                    "build_log_file": str(log_file),
+                    "install_prefix": install_prefix,
+                }
+                return StageResult(
+                    stage_name=self.name,
+                    success=True,
+                    data=data,
+                )
+
+            log.warning("=== Build stage finished: failed ===")
+            if message:
+                log.warning("message: %s", message[:500] + ("..." if len(message) > 500 else ""))
+
+        # Include hint when no LLM was used (no fix suggestions attempted)
+        if llm is None and message:
+            message = (
+                message
+                + "\n\n(No LLM configured: add an LLM plugin and set OPENAI_API_KEY or LLM_PROVIDER in .env for automatic fix suggestions.)"
+            )
+        fail_data: dict = {
+            "build_log_file": str(log_file),
+            "install_prefix": install_prefix,
+        }
+        return StageResult(
+            stage_name=self.name,
+            success=False,
+            message=message or "Build failed",
+            data=fail_data,
+        )
+
+    def can_skip(self, context: PipelineContext) -> bool:
+        """Skip if db_path already set and exists."""
+        if context.db_path is None:
+            return False
+        return Path(context.db_path).exists()

@@ -1,0 +1,140 @@
+# Top critical C, C++, and Python projects (OSS-Fuzz style)
+# Used by scripts/download_projects.py to clone repos into libs/
+#
+# Fields:
+#   name:       Short name (used as directory name under libs/)
+#   repo_url:   Git clone URL
+#   language:   c | cpp | python  (primary language for CodeQL/fuzzing)
+#   branch:     Optional branch or tag to checkout (default: default branch)
+#   build_type: Optional hint: autotools | cmake | make | meson | python (for docs)
+
+projects:
+  # --- C (critical infrastructure) ---
+  - name: openssl
+    repo_url: https://github.com/openssl/openssl.git
+    language: c
+    branch: openssl-3.4
+    build_type: autotools
+
+  - name: curl
+    repo_url: https://github.com/curl/curl.git
+    language: c
+    build_type: autotools
+
+  - name: libxml2
+    repo_url: https://gitlab.gnome.org/GNOME/libxml2.git
+    language: c
+    build_type: autotools
+
+  - name: sqlite
+    repo_url: https://github.com/sqlite/sqlite.git
+    language: c
+    build_type: make
+
+  - name: zlib
+    repo_url: https://github.com/madler/zlib.git
+    language: c
+    build_type: cmake
+
+  - name: libpng
+    repo_url: https://github.com/glennrp/libpng.git
+    language: c
+    build_type: autotools
+
+  - name: libjpeg-turbo
+    repo_url: https://github.com/libjpeg-turbo/libjpeg-turbo.git
+    language: c
+    build_type: cmake
+
+  - name: c-ares
+    repo_url: https://github.com/c-ares/c-ares.git
+    language: c
+    build_type: cmake
+
+  - name: lua
+    repo_url: https://github.com/lua/lua.git
+    language: c
+    build_type: make
+
+  - name: libssh2
+    repo_url: https://github.com/libssh2/libssh2.git
+    language: c
+    build_type: autotools
+
+  - name: libarchive
+    repo_url: https://github.com/libarchive/libarchive.git
+    language: c
+    build_type: cmake
+
+  # --- C++ (critical libraries) ---
+  - name: re2
+    repo_url: https://github.com/google/re2.git
+    language: cpp
+    build_type: cmake
+
+  - name: brotli
+    repo_url: https://github.com/google/brotli.git
+    language: cpp
+    build_type: cmake
+
+  - name: jsoncpp
+    repo_url: https://github.com/open-source-parsers/jsoncpp.git
+    language: cpp
+    build_type: cmake
+
+  - name: rapidjson
+    repo_url: https://github.com/Tencent/rapidjson.git
+    language: cpp
+    build_type: cmake
+
+  - name: harfbuzz
+    repo_url: https://github.com/harfbuzz/harfbuzz.git
+    language: cpp
+    build_type: meson
+
+  - name: freetype
+    repo_url: https://gitlab.freedesktop.org/freetype/freetype.git
+    language: c
+    build_type: cmake
+
+  - name: leveldb
+    repo_url: https://github.com/google/leveldb.git
+    language: cpp
+    build_type: cmake
+
+  - name: protobuf
+    repo_url: https://github.com/protocolbuffers/protobuf.git
+    language: cpp
+    build_type: cmake
+
+  - name: abseil-cpp
+    repo_url: https://github.com/abseil/abseil-cpp.git
+    language: cpp
+    build_type: cmake
+
+  - name: spdlog
+    repo_url: https://github.com/gabime/spdlog.git
+    language: cpp
+    build_type: cmake
+
+  # --- Python (interpreter / critical C extensions) ---
+  - name: cpython
+    repo_url: https://github.com/python/cpython.git
+    language: c
+    branch: v3.13.0
+    build_type: autotools
+
+  - name: Pillow
+    repo_url: https://github.com/python-pillow/Pillow.git
+    language: c
+    build_type: python
+
+  - name: cryptography
+    repo_url: https://github.com/pyca/cryptography.git
+    language: c
+    build_type: python
+
+  - name: lxml
+    repo_url: https://github.com/lxml/lxml.git
+    language: c
+    build_type: python

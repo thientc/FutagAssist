@@ -9,9 +9,9 @@ reporters:
   - sarif
 
 llm:
-  model: gpt-4
-  max_retries: 3
-  temperature: 0.2
+  model: gpt-5.1
+  max_retries: 5
+  temperature: 0.5
 
 fuzzer:
   timeout: 10
