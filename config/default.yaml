@@ -1,0 +1,31 @@
+# FutagAssist default configuration
+# Override in this file or via environment variables (.env)
+
+llm_provider: openai
+fuzzer_engine: libfuzzer
+language: cpp
+reporters:
+  - json
+  - sarif
+
+llm:
+  model: gpt-4
+  max_retries: 3
+  temperature: 0.2
+
+fuzzer:
+  timeout: 10
+  max_total_time: 300
+  fork: 1
+  rss_limit_mb: 2048
+
+pipeline:
+  stages:
+    - build
+    - analyze
+    - generate
+    - compile
+    - fuzz
+    - report
+  skip_stages: []
+  stop_on_failure: true
