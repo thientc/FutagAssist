@@ -102,6 +102,7 @@ The `api_functions.ql` query assigns an **API score**:
 | Takes size parameter | +1 |
 | Input-processing name | +2 |
 
+
 ## CodeQL bundle (required)
 
 The C++ analyzer runs a CodeQL query that `import cpp`. This requires the **CodeQL bundle** (not the standalone CLI), which includes language packs like `codeql/cpp-all`.

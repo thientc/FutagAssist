@@ -120,6 +120,7 @@ See [docs/ANALYZE_STAGE.md](docs/ANALYZE_STAGE.md) for the full list of CodeQL q
 
 ---
 
+
 ## Verify setup (CodeQL, LLM, plugins)
 
 Run `futagassist check` to verify that CodeQL, the configured LLM, plugins (e.g. language analyzers), and the fuzzer engine are working. Failed checks include **suggestions** (paths to set, env vars, or next steps).
