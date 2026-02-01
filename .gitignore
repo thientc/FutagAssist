@@ -216,4 +216,5 @@ src/futagassist/build/__pycache__/**/
 # FutagAssist: misc
 .agents/
 uv.lock
-prereqs/codeql-bundle-linux64.tar.gz
+prereqs/*.tar.gz
+output/**/
