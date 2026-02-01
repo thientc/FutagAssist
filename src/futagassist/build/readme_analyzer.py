@@ -102,6 +102,7 @@ class ReadmeAnalyzer:
         has_configure_ac = (repo_path / "configure.ac").is_file()
         has_makefile_am = (repo_path / "Makefile.am").is_file()
         autogen = repo_path / "autogen.sh"
+        buildconf = repo_path / "buildconf"
 
         # Autotools: configure exists -> use it (some projects' autogen.sh refuses "partial" trees, e.g. libpng)
         if configure_script.exists() and configure_script.is_file():
@@ -110,6 +111,15 @@ class ReadmeAnalyzer:
             if prefix:
                 cmd += " && make install"
             log.info("README analysis: file-based (configure exists) -> %s", cmd)
+            return cmd
+
+        # Autotools from git: no configure but buildconf exists (e.g. curl) -> run buildconf first
+        if (has_configure_ac or has_makefile_am) and buildconf.is_file():
+            cfg = f"./configure --prefix={prefix}" if prefix else "./configure"
+            cmd = f"./buildconf && {cfg} && make"
+            if prefix:
+                cmd += " && make install"
+            log.info("README analysis: file-based (configure.ac + buildconf, no configure) -> %s", cmd)
             return cmd
 
         # Autotools from git: no configure but configure.ac/Makefile.am + autogen.sh -> run autogen.sh first
@@ -228,11 +238,12 @@ class ReadmeAnalyzer:
         has_configure_ac = (repo_path / "configure.ac").is_file()
         has_makefile_am = (repo_path / "Makefile.am").is_file()
         autogen = repo_path / "autogen.sh"
+        buildconf = repo_path / "buildconf"
 
         if configure_script.exists() and configure_script.is_file():
             log.info("Clean command (configure): make clean")
             return "make clean"
-        if (has_configure_ac or has_makefile_am) and autogen.is_file():
+        if (has_configure_ac or has_makefile_am) and (autogen.is_file() or buildconf.is_file()):
             log.info("Clean command (autotools): make clean")
             return "make clean"
         if (repo_path / "meson.build").is_file():

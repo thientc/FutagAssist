@@ -166,6 +166,32 @@ def test_cli_build_accepts_build_script(runner: CliRunner, tmp_path: Path) -> No
             assert "not found" in result.output.lower() or "Build script" in result.output
 
 
+def test_cli_build_configure_options_passed_to_context(runner: CliRunner, tmp_path: Path) -> None:
+    """build with --configure-options passes build_configure_options to stage context."""
+    (tmp_path / "README").write_text("make")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    captured_ctx = []
+
+    def capture_and_succeed(ctx):
+        captured_ctx.append(ctx)
+        return StageResult(
+            stage_name="build",
+            success=True,
+            data={"db_path": str(tmp_path / "codeql-db"), "build_log_file": str(tmp_path / "build.log")},
+        )
+
+    with patch("futagassist.stages.build_stage.BuildStage.execute", side_effect=capture_and_succeed):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(
+                main,
+                ["build", "--repo", str(tmp_path), "--configure-options", "--without-ssl", "--no-interactive"],
+                catch_exceptions=False,
+            )
+    assert result.exit_code == 0
+    assert len(captured_ctx) == 1
+    assert captured_ctx[0].config.get("build_configure_options") == "--without-ssl"
+
+
 def test_cli_build_no_interactive_exits_without_prompt_on_suggested_fix(
     runner: CliRunner, tmp_path: Path
 ) -> None:
@@ -222,15 +248,16 @@ def test_cli_build_interactive_accept_fix_retries(runner: CliRunner, tmp_path: P
 
     with patch("futagassist.stages.build_stage.BuildStage.execute", side_effect=mock_execute):
         with patch("futagassist.cli._is_build_interactive", return_value=True):
-            with patch("futagassist.cli.click.confirm", return_value=True):
-                with patch("futagassist.cli.subprocess.run") as mock_run:
-                    mock_run.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-                    with runner.isolated_filesystem(temp_dir=tmp_path):
-                        result = runner.invoke(
-                            main,
-                            ["build", "--repo", str(tmp_path)],
-                            catch_exceptions=False,
-                        )
+            with patch("futagassist.cli.click.prompt", return_value=""):  # skip configure-options retry
+                with patch("futagassist.cli.click.confirm", return_value=True):
+                    with patch("futagassist.cli.subprocess.run") as mock_run:
+                        mock_run.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+                        with runner.isolated_filesystem(temp_dir=tmp_path):
+                            result = runner.invoke(
+                                main,
+                                ["build", "--repo", str(tmp_path)],
+                                catch_exceptions=False,
+                            )
     assert result.exit_code == 0, result.output
     assert "CodeQL database" in result.output
     assert call_count == 2

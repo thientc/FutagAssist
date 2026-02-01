@@ -4,7 +4,7 @@
  *              Output columns: file_path, line, name, qualified_name, return_type,
  *              param_count, parameters, is_public.
  *              Used by the FutagAssist C++ language analyzer to build FunctionInfo.
- * @kind problem
+ * @kind table
  * @id futagassist/list-functions
  */
 import cpp

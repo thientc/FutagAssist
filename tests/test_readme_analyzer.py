@@ -71,6 +71,21 @@ def test_readme_analyzer_file_based_autogen(tmp_path: Path) -> None:
     assert "make" in full
 
 
+def test_readme_analyzer_file_based_buildconf(tmp_path: Path) -> None:
+    """Repos with configure.ac + buildconf but no configure (e.g. curl git clone) get buildconf && configure && make."""
+    (tmp_path / "configure.ac").write_text("AC_INIT")
+    (tmp_path / "Makefile.am").write_text("SUBDIRS = .")
+    (tmp_path / "buildconf").write_text("#!/bin/sh\nautoreconf -fi")
+    # No configure script, no autogen.sh (curl-style)
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    cmds = analyzer.extract_build_commands(tmp_path)
+    assert len(cmds) >= 1
+    full = " && ".join(cmds)
+    assert "buildconf" in full
+    assert "configure" in full
+    assert "make" in full
+
+
 def test_readme_analyzer_file_based_configure_exists(tmp_path: Path) -> None:
     """Repos with existing configure script (no autogen.sh) get configure && make."""
     (tmp_path / "configure").write_text("#!/bin/sh\nexit 0")

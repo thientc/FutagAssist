@@ -16,8 +16,10 @@ from futagassist.build.readme_analyzer import ReadmeAnalyzer
 FIX_PROMPT = """The build failed with the following output. Suggest a single shell command to fix the environment, to be run from the project root.
 
 Rules:
-- For autotools/libtool errors (LT_PATH_LD, LT_INIT, ltmain.sh not found, "command not found" from configure): the fix is to regenerate the build system, not install packages. Suggest: libtoolize && autoreconf -fi
+- If "./configure: not found" or "configure: not found" (exit 127) and the project has configure.ac: suggest generating configure first. If a file named "buildconf" exists: ./buildconf. Otherwise: autoreconf -fi (or libtoolize && autoreconf -fi).
+- For other autotools/libtool errors (LT_PATH_LD, LT_INIT, ltmain.sh not found, "command not found" from configure): the fix is to regenerate the build system. Suggest: libtoolize && autoreconf -fi
 - For missing compilers or system libs (e.g. "gcc: command not found", "No such file", missing -dev packages): suggest apt-get install of the missing package.
+- For "libs and/or directories were not found", "was not found", "not found where specified" (configure): the missing library is usually named in the message (e.g. libpsl -> libpsl-dev). Suggest: apt-get install -y <package>-dev (e.g. libpsl-dev), or to skip the feature add a configure option like --without-<feature> if the project supports it.
 - If no fix is possible, reply with exactly: none
 
 Build command: {build_cmd}
@@ -28,6 +30,100 @@ Error output:
 ---
 
 Single fix command or "none":"""
+
+# Strip CodeQL log envelope: [YYYY-MM-DD HH:MM:SS] [build-stdout] or [build-stderr] or [ERROR]
+_RE_LOG_PREFIX = re.compile(
+    r"^\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]\s*\[(?:build-stdout|build-stderr|ERROR)\]\s*"
+)
+
+
+def _strip_log_envelope(line: str) -> str:
+    """Remove datetime and channel prefix (build-stdout, build-stderr, ERROR) from a log line."""
+    return _RE_LOG_PREFIX.sub("", line).strip()
+
+
+def _condense_error_for_llm(error_output: str, max_chars: int = 4000) -> str:
+    """
+    Produce a short summary for the LLM: strip log envelope (datetime, build-stdout/stderr),
+    keep only basic build context and actual error lines (error, fatal, not found, failed, etc.).
+    """
+    lines = error_output.splitlines()
+    summary_lines: list[str] = []
+    exit_status: str | None = None
+
+    # Keywords that indicate an error line (after stripping envelope)
+    error_keywords = (
+        "error",
+        "Error",
+        "fatal",
+        "Fatal",
+        "not found",
+        "failed",
+        "Failed",
+        "undefined reference",
+        "No such file",
+        "cannot find",
+        "were not found",
+        "not found where",
+        "No rule to make",
+        "missing",
+    )
+
+    seen_fatal = False
+    for raw_line in lines:
+        line = _strip_log_envelope(raw_line)
+        if not line:
+            continue
+        # Keep context: exit status from "A fatal error occurred: Exit status N" (once)
+        if ("A fatal error occurred" in line or "Exit status" in line) and not seen_fatal:
+            match = re.search(r"Exit status (\d+)", line, re.IGNORECASE)
+            if match:
+                exit_status = match.group(1)
+            summary_lines.append("Build failed (exit status {}).".format(exit_status or "non-zero"))
+            seen_fatal = True
+            continue
+        # Keep short context lines (no timestamp left)
+        if line.startswith("Initializing database") or line.startswith("Running build command") or line.startswith("Running command in"):
+            continue  # skip verbose context
+        # Keep lines that look like errors
+        if any(kw in line for kw in error_keywords):
+            summary_lines.append(line)
+            continue
+        # Keep "configure: error:" style lines (configure script errors)
+        if "configure:" in line and (":" in line):
+            summary_lines.append(line)
+            continue
+
+    condensed = "\n".join(summary_lines)
+    if not condensed.strip():
+        # Fallback: strip envelope from all lines and take last N chars
+        stripped = "\n".join(_strip_log_envelope(l) for l in lines if _strip_log_envelope(l))
+        condensed = stripped[-max_chars:] if len(stripped) > max_chars else stripped
+        if condensed != stripped:
+            condensed = "(output truncated; showing last {} chars)\n{}".format(max_chars, condensed)
+    elif len(condensed) > max_chars:
+        condensed = "(output truncated; showing last {} chars)\n{}".format(
+            max_chars, condensed[-max_chars:]
+        )
+    return condensed
+
+
+def _inject_configure_options(build_commands: list[str], configure_options: str) -> list[str]:
+    """
+    Append configure_options to the first configure step in build_commands.
+    Configure step: cmd.strip().startswith('./configure') or cmd.strip() == 'configure'.
+    Returns a new list (does not mutate input).
+    """
+    opts = configure_options.strip()
+    if not opts:
+        return list(build_commands)
+    result = list(build_commands)
+    for i, cmd in enumerate(result):
+        s = cmd.strip()
+        if s.startswith("./configure") or s == "configure":
+            result[i] = cmd + " " + opts
+            return result
+    return result
 
 
 class BuildOrchestrator:
@@ -53,6 +149,7 @@ class BuildOrchestrator:
         overwrite: bool = False,
         install_prefix: str | Path | None = None,
         build_script: str | Path | None = None,
+        configure_options: str | None = None,
     ) -> tuple[bool, Path | None, str, str | None]:
         """
         Run build with CodeQL wrapper. Returns (success, db_path or None, message, suggested_fix_cmd or None).
@@ -61,6 +158,7 @@ class BuildOrchestrator:
         so the library is installed to a custom folder for a future linking stage.
         If build_script is set, that script is run with CodeQL instead of auto-extracted
         build commands; path is resolved relative to repo_path if not absolute.
+        If configure_options is set, extra flags are appended to the configure step (ignored when using build_script).
         """
         repo_path = Path(repo_path).resolve()
         if not repo_path.is_dir():
@@ -85,6 +183,9 @@ class BuildOrchestrator:
             build_commands = self._analyzer.extract_build_commands(
                 repo_path, install_prefix=install_prefix
             )
+            if configure_options:
+                build_commands = _inject_configure_options(build_commands, configure_options)
+                log.info("Configure options applied: %s", configure_options.strip())
             full_build_cmd = build_command_to_shell(build_commands, repo_path)
             use_temp_script = True
 
@@ -236,7 +337,9 @@ class BuildOrchestrator:
             log.info("LLM fix: no LLM configured; skipping")
             return None, None
         try:
-            prompt = FIX_PROMPT.format(build_cmd=build_cmd, error_output=error_output[:4000])
+            # Send only condensed error: strip datetime/build-stdout/build-stderr, keep error lines and basic context
+            error_snippet = _condense_error_for_llm(error_output, max_chars=4000)
+            prompt = FIX_PROMPT.format(build_cmd=build_cmd, error_output=error_snippet)
             log.info("LLM fix: asking for fix command")
             log.debug("LLM prompt (fix):\n%s", prompt[:2500] + ("..." if len(prompt) > 2500 else ""))
             out = self._llm.complete(prompt).strip().split("\n")[0].strip()

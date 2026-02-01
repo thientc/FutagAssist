@@ -97,7 +97,7 @@ If `codeql resolve packs` shows the `codeql/cpp-all` pack, the installation is c
 ## Command
 
 ```bash
-futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--overwrite] [--build-script <PATH>] [--log-file <PATH>] [--no-interactive] [-v|--verbose]
+futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--overwrite] [--build-script <PATH>] [--configure-options <FLAGS>] [--log-file <PATH>] [--no-interactive] [-v|--verbose]
 ```
 
 | Option      | Description |
@@ -107,6 +107,7 @@ futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--over
 | `--language` | CodeQL language: `cpp`, `c`, or `python`. Default: `cpp`. |
 | `--overwrite` | If the database path already exists, pass CodeQL’s `--overwrite` to replace it. |
 | `--build-script` | Use this script as the build command with CodeQL (run from repo root; **overrides** auto-extracted build). Path relative to `--repo` if not absolute. The script should be executable (`chmod +x`). |
+| `--configure-options` | Extra flags for the **configure** step (e.g. `--without-ssl`, `--with-openssl`). Appended to the detected `./configure` command only. Ignored when using `--build-script`. Useful for projects that require a TLS backend or other configure choices (e.g. curl). |
 | `--log-file` | Write the build-stage log to this file. Default: `<repo>/futagassist-build.log`. |
 | `--no-interactive` | Never prompt; on failure with a suggested fix, print and exit without asking to run it (e.g. for CI). |
 | `--verbose` / `-v` | Verbose build log (DEBUG level): full LLM prompts and responses, CodeQL command, etc. |
@@ -124,7 +125,7 @@ futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--over
    - **`--overwrite`** replaces the CodeQL database directory and runs a **clean step** before building: FutagAssist infers a clean command from the build system (e.g. `make clean` for autotools, `ninja -C build -t clean` for Meson, `cmake --build build --target clean` for CMake) and runs it from the repo root. If the clean step fails (e.g. no Makefile yet), the build continues anyway. When using **`--build-script`**, no clean step is run.
 
 3. **Failure handling**
-   - If the build fails and an LLM is configured, FutagAssist asks for a single fix command (e.g. install a package) and prints it. In **interactive** mode (stdin is a TTY and you did not pass `--no-interactive`), the CLI may prompt: *Run this fix and retry build? [y/N]*. If you answer yes, it runs the fix command in the repo root and retries the build once. If you answer no, or if you use `--no-interactive` (e.g. in CI), it exits with an error and the last build log is shown; you can run the suggested command manually and re-run `futagassist build`.
+   - If the build fails and an LLM is configured, FutagAssist asks for a single fix command (e.g. install a package) and prints it. In **interactive** mode (stdin is a TTY and you did not pass `--no-interactive`), the CLI first prompts: *Add configure options for retry? (e.g. --without-ssl) [leave empty to skip]:* — you can type extra configure flags (e.g. `--without-ssl` for curl) and FutagAssist will retry the build with those options appended to the configure step. If you leave it empty, it then may prompt: *Run this fix and retry build? [y/N]* for the LLM-suggested fix. If you answer yes, it runs the fix command in the repo root and retries the build once. If you answer no, or if you use `--no-interactive` (e.g. in CI), it exits with an error and the last build log is shown; you can run the suggested command manually and re-run `futagassist build`.
    - If all retries fail or no LLM is configured, the command exits with an error and the last build log is shown.
 
 4. **Build log**
@@ -145,6 +146,16 @@ futagassist build --repo /home/user/repos/zlib
 
 ```bash
 futagassist build --repo libs/curl --output ./databases/curl-db --language c
+```
+
+**Projects that require configure flags (e.g. curl — select TLS backend or disable TLS):**
+
+```bash
+# Disable TLS (minimal deps)
+futagassist build --repo libs/curl --configure-options "--without-ssl"
+
+# Or use OpenSSL
+futagassist build --repo libs/curl --configure-options "--with-openssl"
 ```
 
 **Use a custom build script (run with CodeQL from repo root):**
@@ -203,6 +214,9 @@ When a build fails, the CLI prints:
 
 - **“LT_PATH_LD: command not found” or “ltmain.sh not found” (autotools)**  
   The project uses autotools and the build system needs to be **regenerated** with your system’s libtool/autoconf. Installing `libtool autoconf automake` is not enough. From the repo root run: `libtoolize && autoreconf -fi`, then run `futagassist build` again. (Some projects' `autogen.sh` refuses to run on "partial" trees; prefer `libtoolize && autoreconf -fi` for that case.)
+
+- **“configure: error: select TLS backend(s) or disable TLS with --without-ssl” (curl)**  
+  Curl’s configure requires a TLS backend or `--without-ssl`. Run with extra configure options: `futagassist build --repo libs/curl --configure-options "--without-ssl"` or `--configure-options "--with-openssl"`. In interactive mode, when the build fails, you can type `--without-ssl` at the “Add configure options for retry?” prompt and FutagAssist will retry with that.
 
 - **Wrong build command inferred**  
   The heuristic can be wrong. With an LLM, extraction is usually better. You can also build the project once manually, then run CodeQL yourself:

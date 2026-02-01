@@ -3,7 +3,7 @@
  * @description Identify functions that are excellent candidates for fuzzing.
  *              These take raw input data (buffer + size, strings, file handles)
  *              and are likely entry points for parsing, decoding, or processing.
- * @kind problem
+ * @kind table
  * @id futagassist/fuzz-targets
  */
 import cpp
@@ -132,13 +132,19 @@ string fuzzTargetType(Function f) {
 /**
  * Compute fuzz priority score.
  */
+int scoreBufferAndSize(Function f) { if takesBufferAndSize(f) then result = 10 else result = 0 }
+int scoreCString(Function f) { if takesCString(f) then result = 5 else result = 0 }
+int scoreInputProcessor(Function f) { if isInputProcessor(f) then result = 5 else result = 0 }
+int scorePublicAPI(Function f) { if isPublicAPI(f) then result = 3 else result = 0 }
+int scoreNonStatic(Function f) { if not f.isStatic() then result = 2 else result = 0 }
+
 int fuzzScore(Function f) {
-  result = 
-    (if takesBufferAndSize(f) then 10 else 0) +
-    (if takesCString(f) then 5 else 0) +
-    (if isInputProcessor(f) then 5 else 0) +
-    (if isPublicAPI(f) then 3 else 0) +
-    (if not f.isStatic() then 2 else 0)
+  result =
+    scoreBufferAndSize(f) +
+    scoreCString(f) +
+    scoreInputProcessor(f) +
+    scorePublicAPI(f) +
+    scoreNonStatic(f)
 }
 
 // String-returning wrappers for select
@@ -173,4 +179,4 @@ select
   inputProcessorStr(f) as input_processor,
   publicAPIStr(f) as public_api,
   score as fuzz_score
-order by score desc
+order by fuzz_score desc

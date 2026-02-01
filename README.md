@@ -54,6 +54,9 @@ futagassist build --repo /path/to/library
 
 # Specify database path and language
 futagassist build --repo /path/to/library --output /path/to/codeql-db --language cpp
+
+# Projects that need configure flags (e.g. curl: TLS backend)
+futagassist build --repo /path/to/curl --configure-options "--without-ssl"
 ```
 
 **What it does:**

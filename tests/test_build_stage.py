@@ -140,3 +140,29 @@ def test_build_stage_failure_includes_suggested_fix_command(tmp_path: Path) -> N
     assert result.success is False
     assert result.data is not None
     assert result.data.get("suggested_fix_command") == "libtoolize && autoreconf -fi"
+
+
+def test_build_stage_passes_configure_options_to_orchestrator(tmp_path: Path) -> None:
+    """When context has build_configure_options, orchestrator.build is called with configure_options."""
+    (tmp_path / "README").write_text("make")
+    registry = ComponentRegistry()
+    from futagassist.core.config import ConfigManager
+    config_mgr = ConfigManager(project_root=tmp_path)
+    config_mgr._config_path = tmp_path / "nonexistent.yaml"
+    config_mgr.load()
+
+    ctx = PipelineContext(
+        repo_path=tmp_path,
+        config={
+            "registry": registry,
+            "config_manager": config_mgr,
+            "build_configure_options": "--without-ssl",
+        },
+    )
+    stage = BuildStage()
+    with patch("futagassist.build.build_orchestrator.BuildOrchestrator.build") as m:
+        m.return_value = (True, tmp_path / "codeql-db", "", None)
+        stage.execute(ctx)
+    m.assert_called_once()
+    call_kwargs = m.call_args[1]
+    assert call_kwargs.get("configure_options") == "--without-ssl"

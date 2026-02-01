@@ -112,6 +112,7 @@ def plugins_list() -> None:
 @click.option("--log-file", "build_log_file", type=click.Path(path_type=Path), help="Write build-stage log to this file (default: <repo>/futagassist-build.log).")
 @click.option("--verbose", "-v", "build_verbose", is_flag=True, help="Verbose build log (DEBUG level, includes full LLM prompts/responses).")
 @click.option("--build-script", "build_script", type=click.Path(path_type=Path), help="Use this script as the build command with CodeQL (run from repo root; overrides auto-extracted build). Path relative to --repo if not absolute; script should be executable.")
+@click.option("--configure-options", "build_configure_options", default=None, help="Extra flags for the configure step (e.g. --without-ssl). Ignored when using --build-script.")
 @click.option("--no-interactive", "no_interactive", is_flag=True, help="Never prompt (e.g. in CI); on failure with a suggested fix, print and exit without asking to run it.")
 def build(
     repo_path: Path,
@@ -121,6 +122,7 @@ def build(
     build_log_file: Path | None,
     build_verbose: bool,
     build_script: Path | None,
+    build_configure_options: str | None,
     no_interactive: bool,
 ) -> None:
     """Build project and create CodeQL database (README analysis + CodeQL wrapper)."""
@@ -136,6 +138,7 @@ def build(
             "build_log_file": build_log_file.resolve() if build_log_file else None,
             "build_verbose": build_verbose,
             "build_script": str(build_script) if build_script else None,
+            "build_configure_options": build_configure_options,
         },
     )
     stage = registry.get_stage("build")
@@ -157,6 +160,31 @@ def build(
     suggested_fix = result.data.get("suggested_fix_command") if result.data else None
     interactive = _is_build_interactive(no_interactive)
 
+    # Interactive: offer to add configure options for retry (e.g. --without-ssl for curl)
+    if interactive:
+        configure_opts_input = click.prompt(
+            "Add configure options for retry? (e.g. --without-ssl) [leave empty to skip]",
+            default="",
+            show_default=False,
+            err=True,
+        )
+        if configure_opts_input and configure_opts_input.strip():
+            ctx.config["build_configure_options"] = configure_opts_input.strip()
+            result = stage.execute(ctx)
+            if result.success and result.data.get("db_path"):
+                click.echo("Build succeeded.")
+                click.echo(f"CodeQL database: {result.data['db_path']}")
+                if result.data.get("build_log_file"):
+                    click.echo(f"Build log: {result.data['build_log_file']}")
+                return
+            click.echo("Build failed after retry.", err=True)
+            if result.message:
+                click.echo(result.message, err=True)
+            if result.data and result.data.get("build_log_file"):
+                click.echo(f"Build log: {result.data['build_log_file']}", err=True)
+            raise SystemExit(1)
+
+    # Interactive: offer to run LLM-suggested fix
     if suggested_fix and interactive:
         if "sudo" in suggested_fix:
             click.echo("Warning: suggested command contains 'sudo'.", err=True)

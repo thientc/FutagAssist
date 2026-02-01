@@ -3,7 +3,7 @@
  * @description Classify each function parameter by semantic role (FILE_PATH, FILE_HANDLE, URL, etc.)
  *              based on parameter name and type. Used by the analyze stage to attach parameter_semantics
  *              to FunctionInfo; the generate stage consumes this to emit appropriate harness code.
- * @kind problem
+ * @kind table
  * @id futagassist/parameter-semantics
  */
 import cpp
@@ -76,4 +76,4 @@ select
   f.getName() as name,
   paramIndex as param_index,
   paramSemanticRole(p) as semantic_role
-order by file_path, line, name, paramIndex
+order by file_path, line, name, param_index

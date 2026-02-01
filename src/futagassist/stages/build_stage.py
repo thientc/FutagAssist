@@ -79,6 +79,7 @@ class BuildStage:
             )
 
             overwrite = context.config.get("build_overwrite", False)
+            configure_options = context.config.get("build_configure_options")
             success, result_db, message, suggested_fix_cmd = orchestrator.build(
                 repo_path=Path(repo_path),
                 db_path=Path(db_path) if db_path else None,
@@ -86,6 +87,7 @@ class BuildStage:
                 overwrite=overwrite,
                 install_prefix=None,
                 build_script=build_script,
+                configure_options=configure_options,
             )
 
             if success and result_db is not None:
@@ -103,7 +105,8 @@ class BuildStage:
 
             log.warning("=== Build stage finished: failed ===")
             if message:
-                log.warning("message: %s", message[:500] + ("..." if len(message) > 500 else ""))
+                # Log full failure message so the log file contains the actual error (e.g. "./configure: not found")
+                log.warning("message:\n%s", message)
 
         # Include hint when no LLM was used (no fix suggestions attempted)
         if llm is None and message:

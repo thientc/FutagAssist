@@ -3,7 +3,7 @@
  * @description Identify public API functions that are good candidates for fuzz targets.
  *              These include: functions declared in headers, extern functions, functions
  *              with external linkage, and functions that process input data.
- * @kind problem
+ * @kind table
  * @id futagassist/api-functions
  */
 import cpp
@@ -74,13 +74,19 @@ string getParamsSignature(Function f) {
 /**
  * Compute an API score (higher = better fuzz target candidate).
  */
+int scoreDeclaredInHeader(Function f) { if isDeclaredInHeader(f) then result = 3 else result = 0 }
+int scoreExternalLinkage(Function f) { if hasExternalLinkage(f) then result = 2 else result = 0 }
+int scoreTakesPointerParam(Function f) { if takesPointerParam(f) then result = 2 else result = 0 }
+int scoreTakesSizeParam(Function f) { if takesSizeParam(f) then result = 1 else result = 0 }
+int scoreInputProcessingName(Function f) { if hasInputProcessingName(f) then result = 2 else result = 0 }
+
 int apiScore(Function f) {
-  result = 
-    (if isDeclaredInHeader(f) then 3 else 0) +
-    (if hasExternalLinkage(f) then 2 else 0) +
-    (if takesPointerParam(f) then 2 else 0) +
-    (if takesSizeParam(f) then 1 else 0) +
-    (if hasInputProcessingName(f) then 2 else 0)
+  result =
+    scoreDeclaredInHeader(f) +
+    scoreExternalLinkage(f) +
+    scoreTakesPointerParam(f) +
+    scoreTakesSizeParam(f) +
+    scoreInputProcessingName(f)
 }
 
 // String-returning wrappers for select
@@ -112,4 +118,4 @@ select
   takesSizeStr(f) as takes_size,
   inputProcessingStr(f) as input_processing_name,
   score as api_score
-order by score desc
+order by api_score desc
