@@ -213,6 +213,6 @@ libs/
 !src/futagassist/build/
 
 
-# FutagAssist: default extract destination (DB, codeql-out, schema per lib)
-.agents/futagassist_architecture_1df0e747.plan.md:Zone.Identifier
-.agents/futagassist_architecture_1df0e747.plan.md
+# FutagAssist: misc
+.agents/
+uv.lock
