@@ -156,6 +156,30 @@ process(data, data_len);
 
 Size parameter detection patterns: `*_len`, `*_size`, `*_length`, `*_count`, `len`, `size`, `n`, `num*`, `cb*`
 
+### Parameter semantics (analyze-stage input)
+
+When the analyze stage has run with the C++ analyzer, each function may have **parameter_semantics** (one string per parameter). The generator uses these to override type-based logic:
+
+| Semantic | Behavior |
+|----------|----------|
+| FILE_PATH, CONFIG_PATH, URL | Write fuzz input to a temporary file via `mkstemp`, pass the path to the function. Includes `<cstdio>` and `<unistd.h>`. |
+| FILE_HANDLE | Same temp file, then `fopen`; pass `FILE*` to the function; **fclose** after the call. |
+| CALLBACK, USERDATA | Pass `nullptr` (with a comment). |
+
+This produces harnesses that exercise file-based APIs (e.g. `parse_file(const char* path)`) by feeding fuzz data as file content.
+
+## Generation priority and output layout
+
+Harnesses are generated in **priority order** and, when using category subdirs, written into:
+
+| Category | Description | Subdir |
+|----------|-------------|--------|
+| api | Public API functions (from `api_functions.ql`) | `output/api/` |
+| usage_contexts | Call sequences (usage contexts) | `output/usage_contexts/` |
+| other | Remaining functions | `output/other/` |
+
+Order: API functions first, then usage-context sequences, then other functions. Use `--max-targets` to cap the total number of harnesses.
+
 ## Compile flags
 
 Generated harnesses include default compile flags for libFuzzer:
@@ -182,13 +206,21 @@ futagassist generate --functions ./output/functions.json --no-validate
 
 ## Output structure
 
+With category subdirs (default when categories are set):
+
 ```
 fuzz_targets/
-├── harness_png_read_image.cpp
-├── harness_png_write_png.cpp
-├── harness_png_create_read_struct.cpp
-└── harness_seq_init_read_cleanup.cpp   # sequence harness
+├── api/
+│   ├── harness_parse_file.cpp
+│   └── harness_decode.cpp
+├── usage_contexts/
+│   └── harness_seq_init_read_cleanup.cpp
+└── other/
+    ├── harness_helper.cpp
+    └── ...
 ```
+
+Without category subdirs (or when categories are empty), all harnesses are written directly under `fuzz_targets/` with filenames like `harness_<name>.cpp` and `harness_seq_<name>.cpp`.
 
 ## Harness validation
 

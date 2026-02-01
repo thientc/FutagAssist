@@ -138,16 +138,48 @@ class HarnessGenerator:
         usage_contexts: list[UsageContext] | None = None,
         use_llm: bool = True,
         max_targets: int | None = None,
+        ordered_items: list[tuple] | None = None,
+        use_subdirs: bool = True,
     ) -> list[GeneratedHarness]:
-        """Generate harnesses for multiple functions and/or sequences."""
-        harnesses: list[GeneratedHarness] = []
-        remaining = max_targets
+        """Generate harnesses for multiple functions and/or sequences.
 
-        # Generate for individual functions
+        If ordered_items is provided, each element is (item, category) where item is
+        FunctionInfo or UsageContext and category is 'api', 'usage_contexts', or 'other'.
+        Otherwise falls back to legacy order: functions first, then usage_contexts.
+        """
+        harnesses: list[GeneratedHarness] = []
+        if usage_contexts is None:
+            usage_contexts = []
+
+        if ordered_items:
+            for item, category in ordered_items:
+                try:
+                    if isinstance(item, FunctionInfo):
+                        harness = self.generate_for_function(item, use_llm=use_llm)
+                    else:
+                        harness = self.generate_for_sequence(item, functions, use_llm=use_llm)
+                    harness.category = category
+                    harnesses.append(harness)
+                except Exception as e:
+                    name = getattr(item, "name", None) or (getattr(item, "calls", ["?"])[0] if getattr(item, "calls", None) else "?")
+                    log.warning("Failed to generate harness for %s: %s", name, e)
+                    harnesses.append(
+                        GeneratedHarness(
+                            function_name=str(name),
+                            is_valid=False,
+                            validation_errors=[str(e)],
+                            category=category,
+                        )
+                    )
+            return harnesses
+
+        # Legacy path: no ordered_items
+        remaining = max_targets
         funcs_to_process = functions[:remaining] if remaining else functions
         for func in funcs_to_process:
             try:
                 harness = self.generate_for_function(func, use_llm=use_llm)
+                harness.category = "other" if use_subdirs else ""
                 harnesses.append(harness)
             except Exception as e:
                 log.warning("Failed to generate harness for %s: %s", func.name, e)
@@ -156,23 +188,20 @@ class HarnessGenerator:
                         function_name=func.name,
                         is_valid=False,
                         validation_errors=[str(e)],
+                        category="other" if use_subdirs else "",
                     )
                 )
-
-        # Update remaining count
         if remaining:
             remaining = max(0, remaining - len(funcs_to_process))
-
-        # Generate for usage contexts (call sequences)
         if usage_contexts and (remaining is None or remaining > 0):
             contexts_to_process = usage_contexts[:remaining] if remaining else usage_contexts
             for ctx in contexts_to_process:
                 try:
                     harness = self.generate_for_sequence(ctx, functions, use_llm=use_llm)
+                    harness.category = "usage_contexts" if use_subdirs else ""
                     harnesses.append(harness)
                 except Exception as e:
                     log.warning("Failed to generate harness for sequence %s: %s", ctx.name, e)
-
         return harnesses
 
     def _generate_with_llm(self, func: FunctionInfo) -> GeneratedHarness:
@@ -207,6 +236,10 @@ class HarnessGenerator:
         """Generate harness using template with FuzzedDataProvider."""
         # Build includes
         includes_list = []
+        semantics = getattr(func, "parameter_semantics", None) or []
+        if any(s in ("FILE_PATH", "FILE_HANDLE", "CONFIG_PATH", "URL") for s in semantics):
+            includes_list.append("#include <cstdio>")
+            includes_list.append("#include <unistd.h>")
         if func.file_path:
             # Try to include the header for this source file
             header = func.file_path.replace(".c", ".h").replace(".cpp", ".h")
@@ -431,21 +464,39 @@ class HarnessGenerator:
         # Reserved names that can't be used as variable names
         reserved = {"data", "size", "fdp", "result"}
 
-        # Generate consume code for each parameter
+        # Parameter semantics from analyze stage (one per parameter, by index)
+        semantics: list[str] = getattr(func, "parameter_semantics", None) or []
+
+        # Generate consume code for each parameter; track FILE_HANDLE vars for cleanup
         arg_names: list[str] = []
         consumed_size_params: set[str] = set()
+        cleanup_handles: list[str] = []  # FILE* vars to fclose after call
+        param_index = 0
 
         for param, size_param in pairs:
             if size_param:
                 consumed_size_params.add(size_param.name)
+
+            # Semantic override from analyze stage (FILE_PATH, FILE_HANDLE, CALLBACK, USERDATA, etc.)
+            semantic_override: str | None = None
+            if param_index < len(semantics):
+                role = semantics[param_index]
+                if role in ("FILE_PATH", "FILE_HANDLE", "CALLBACK", "USERDATA", "CONFIG_PATH", "URL"):
+                    semantic_override = role
 
             # Determine if we need a prefix for reserved names
             name_prefix = ""
             if (param.name and param.name in reserved) or (size_param and size_param.name in reserved):
                 name_prefix = "fuzz_"
 
-            code, var_name, size_var_name = generate_fdp_consume(param, size_param, name_prefix)
+            code, var_name, size_var_name = generate_fdp_consume(
+                param, size_param, name_prefix, semantic_override=semantic_override
+            )
             lines.append(code)
+            param_index += 2 if size_param else 1
+
+            if semantic_override == "FILE_HANDLE":
+                cleanup_handles.append(var_name)
 
             # Add both buffer and size to args when they're paired
             if size_param and size_var_name:
@@ -463,6 +514,10 @@ class HarnessGenerator:
             lines.append("    (void)result;  // Prevent unused variable warning")
         else:
             lines.append(f"    {func.name}({args_str});")
+
+        # Cleanup FILE_HANDLE (fclose) after call
+        for handle_var in cleanup_handles:
+            lines.append(f"    if ({handle_var}) fclose({handle_var});")
 
         return "\n".join(lines)
 
@@ -523,9 +578,10 @@ class HarnessGenerator:
         self,
         harnesses: list[GeneratedHarness],
         output_dir: Path | None = None,
+        use_subdirs: bool = True,
     ) -> list[Path]:
-        """Write harnesses to files and return paths."""
-        out = output_dir or self._output_dir
+        """Write harnesses to files and return paths. If use_subdirs and harness.category is set, write to output_dir/category/file_path."""
+        out = Path(output_dir or self._output_dir)
         if not out:
             raise ValueError("output_dir not specified")
 
@@ -535,7 +591,12 @@ class HarnessGenerator:
         for harness in harnesses:
             if not harness.source_code:
                 continue
-            file_path = out / harness.file_path
+            if use_subdirs and getattr(harness, "category", ""):
+                subdir = out / harness.category
+                subdir.mkdir(parents=True, exist_ok=True)
+                file_path = subdir / harness.file_path
+            else:
+                file_path = out / harness.file_path
             file_path.write_text(harness.source_code)
             written.append(file_path)
             log.debug("Wrote harness: %s", file_path)

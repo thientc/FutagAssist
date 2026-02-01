@@ -19,6 +19,11 @@ class FunctionInfo(BaseModel):
     line: int = 0
     includes: list[str] = Field(default_factory=list)
     context: str = ""
+    # Priority/category from analyze stage (api_functions.ql, fuzz_targets.ql)
+    is_api: bool = False
+    is_fuzz_target_candidate: bool = False
+    # Parameter semantic roles from analyze stage (parameter_semantics.ql), one per parameter
+    parameter_semantics: list[str] = Field(default_factory=list)
 
 
 class UsageContext(BaseModel):
@@ -53,6 +58,21 @@ class CoverageReport(BaseModel):
     regions_total: int = 0
     html_path: str = ""
     csv_path: str = ""
+
+
+class GeneratedHarness(BaseModel):
+    """A generated fuzz harness (target) for a function or usage context."""
+
+    function_name: str
+    file_path: str = ""
+    source_code: str = ""
+    includes: list[str] = Field(default_factory=list)
+    compile_flags: list[str] = Field(default_factory=list)
+    link_flags: list[str] = Field(default_factory=list)
+    validation_errors: list[str] = Field(default_factory=list)
+    is_valid: bool = True
+    # Category for output subdir: api, usage_contexts, other
+    category: str = ""
 
 
 class FuzzResult(BaseModel):
@@ -95,6 +115,7 @@ class PipelineContext(BaseModel):
     language: str = "cpp"
     functions: list[FunctionInfo] = Field(default_factory=list)
     usage_contexts: list[UsageContext] = Field(default_factory=list)
+    generated_harnesses: list[GeneratedHarness] = Field(default_factory=list)
     fuzz_targets_dir: Path | None = None
     binaries_dir: Path | None = None
     results_dir: Path | None = None
@@ -112,6 +133,8 @@ class PipelineContext(BaseModel):
                 self.functions = result.data["functions"]
             if "usage_contexts" in result.data:
                 self.usage_contexts = result.data["usage_contexts"]
+            if "generated_harnesses" in result.data:
+                self.generated_harnesses = result.data["generated_harnesses"]
             if "fuzz_targets_dir" in result.data:
                 self.fuzz_targets_dir = result.data["fuzz_targets_dir"]
             if "binaries_dir" in result.data:
@@ -127,6 +150,7 @@ class PipelineContext(BaseModel):
             db_path=self.db_path,
             functions=self.functions,
             usage_contexts=self.usage_contexts,
+            generated_harnesses=self.generated_harnesses,
             fuzz_targets_dir=self.fuzz_targets_dir,
             binaries_dir=self.binaries_dir,
             fuzz_results=self.fuzz_results,
@@ -143,6 +167,7 @@ class PipelineResult(BaseModel):
     db_path: Path | None = None
     functions: list[FunctionInfo] = Field(default_factory=list)
     usage_contexts: list[UsageContext] = Field(default_factory=list)
+    generated_harnesses: list[GeneratedHarness] = Field(default_factory=list)
     fuzz_targets_dir: Path | None = None
     binaries_dir: Path | None = None
     fuzz_results: list[FuzzResult] = Field(default_factory=list)

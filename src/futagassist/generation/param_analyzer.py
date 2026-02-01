@@ -202,13 +202,41 @@ def generate_fdp_consume(
     param: ParsedParam,
     size_param: ParsedParam | None = None,
     name_prefix: str = "",
+    semantic_override: str | None = None,
 ) -> tuple[str, str, str | None]:
     """Generate FuzzedDataProvider consume code for a parameter.
 
+    semantic_override: from analyze stage (e.g. FILE_PATH, FILE_HANDLE). When set, overrides type-based logic.
     Returns: (declaration_code, variable_name, size_variable_name or None)
     """
     name = name_prefix + (param.name or "arg")
     size_name = name_prefix + size_param.name if size_param else None
+
+    # Semantic overrides from analyze stage (temp file for path/handle)
+    if semantic_override in ("FILE_PATH", "CONFIG_PATH", "URL"):
+        # CONFIG_PATH and URL: same as FILE_PATH (temp file, pass path)
+        semantic_override = "FILE_PATH"
+    if semantic_override == "FILE_PATH":
+        code = f"    std::vector<uint8_t> {name}_buf = fdp.ConsumeBytes<uint8_t>(fdp.remaining_bytes());\n"
+        code += f"    char {name}_path[] = \"/tmp/fuzz_XXXXXXXX\";\n"
+        code += f"    int {name}_fd = mkstemp({name}_path);\n"
+        code += f"    if ({name}_fd < 0) return 0;\n"
+        code += f"    write({name}_fd, {name}_buf.data(), {name}_buf.size());\n"
+        code += f"    close({name}_fd);\n"
+        code += f"    const char* {name} = {name}_path;"
+        return code, name, None
+    if semantic_override == "FILE_HANDLE":
+        code = f"    std::vector<uint8_t> {name}_buf = fdp.ConsumeBytes<uint8_t>(fdp.remaining_bytes());\n"
+        code += f"    char {name}_path[] = \"/tmp/fuzz_XXXXXXXX\";\n"
+        code += f"    int {name}_fd = mkstemp({name}_path);\n"
+        code += f"    if ({name}_fd < 0) return 0;\n"
+        code += f"    write({name}_fd, {name}_buf.data(), {name}_buf.size());\n"
+        code += f"    close({name}_fd);\n"
+        code += f"    FILE* {name} = fopen({name}_path, \"rb\");\n"
+        code += f"    if (!{name}) return 0;"
+        return code, name, None
+    if semantic_override in ("CALLBACK", "USERDATA"):
+        return f"    {param.type_str} {name} = nullptr;  // semantic: {semantic_override}", name, None
 
     if param.kind == ParamKind.BOOL:
         return f"    bool {name} = fdp.ConsumeBool();", name, None

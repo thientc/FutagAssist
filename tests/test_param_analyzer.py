@@ -238,3 +238,31 @@ class TestGenerateFdpConsume:
         code, var_name, size_name = generate_fdp_consume(param)
         assert "nullptr" in code
         assert "TODO" in code
+
+    def test_semantic_override_file_path(self):
+        """Test FILE_PATH semantic override: temp file and path."""
+        param = parse_parameter("const char* filename")
+        code, var_name, size_name = generate_fdp_consume(param, semantic_override="FILE_PATH")
+        assert "mkstemp" in code
+        assert "fuzz_XXXXXXXX" in code
+        assert "const char*" in code or "filename" in code
+        assert var_name == "filename"
+        assert size_name is None
+
+    def test_semantic_override_file_handle(self):
+        """Test FILE_HANDLE semantic override: temp file and fopen."""
+        param = parse_parameter("FILE* fp")
+        code, var_name, size_name = generate_fdp_consume(param, semantic_override="FILE_HANDLE")
+        assert "mkstemp" in code
+        assert "fopen" in code
+        assert "fdp.ConsumeBytes" in code
+        assert var_name == "fp"
+        assert size_name is None
+
+    def test_semantic_override_callback(self):
+        """Test CALLBACK semantic override: nullptr."""
+        param = parse_parameter("void (*cb)(int)")
+        code, var_name, size_name = generate_fdp_consume(param, semantic_override="CALLBACK")
+        assert "nullptr" in code
+        assert "CALLBACK" in code or "semantic" in code
+        assert size_name is None

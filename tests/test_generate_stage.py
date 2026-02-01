@@ -215,6 +215,28 @@ class TestHarnessGenerator:
         assert harness.file_path.startswith("harness_")
         assert harness.file_path.endswith(".cpp")
 
+    def test_generate_for_function_parameter_semantics_file_path(self):
+        """Test that FILE_PATH parameter_semantics produces temp-file code."""
+        from futagassist.generation.harness_generator import HarnessGenerator
+
+        func = FunctionInfo(
+            name="parse_file",
+            signature="int parse_file(const char* filename)",
+            return_type="int",
+            parameters=["const char* filename"],
+            file_path="parser.c",
+            line=1,
+            parameter_semantics=["FILE_PATH"],
+        )
+        generator = HarnessGenerator(llm=None, language="cpp")
+        harness = generator.generate_for_function(func, use_llm=False)
+
+        assert harness.function_name == "parse_file"
+        assert "mkstemp" in harness.source_code
+        assert "fuzz_XXXXXXXX" in harness.source_code
+        assert "parse_file(" in harness.source_code
+        assert "<cstdio>" in harness.source_code or "<unistd.h>" in harness.source_code
+
     def test_generate_for_function_with_llm(self, sample_functions):
         """Test LLM-based harness generation."""
         from futagassist.generation.harness_generator import HarnessGenerator

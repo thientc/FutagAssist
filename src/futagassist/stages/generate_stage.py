@@ -62,6 +62,24 @@ class GenerateStage:
 
         # Get max targets from config
         max_targets = context.config.get("max_targets")
+        use_subdirs = context.config.get("generate_subdirs", True)
+
+        # Priority order: API functions, usage_contexts, other functions (fuzz_target + rest)
+        api_functions = [f for f in functions if getattr(f, "is_api", False)]
+        fuzz_only = [f for f in functions if getattr(f, "is_fuzz_target_candidate", False) and not getattr(f, "is_api", False)]
+        other_functions = [f for f in functions if f not in api_functions and f not in fuzz_only]
+        usage_contexts = context.usage_contexts or []
+
+        ordered_items: list[tuple] = []
+        for f in api_functions:
+            ordered_items.append((f, "api"))
+        for uc in usage_contexts:
+            ordered_items.append((uc, "usage_contexts"))
+        for f in fuzz_only + other_functions:
+            ordered_items.append((f, "other"))
+
+        if max_targets is not None:
+            ordered_items = ordered_items[:max_targets]
 
         # Create generator
         generator = HarnessGenerator(
@@ -70,17 +88,22 @@ class GenerateStage:
             output_dir=output_dir,
         )
 
-        # Generate harnesses
+        # Generate harnesses (with category for subdirs)
         log.info(
-            "Generating harnesses for %d functions%s",
-            len(functions),
+            "Generating harnesses: %d API, %d usage_contexts, %d other (total %d)%s",
+            len(api_functions),
+            len(usage_contexts),
+            len(fuzz_only) + len(other_functions),
+            len(ordered_items),
             f" (max {max_targets})" if max_targets else "",
         )
         harnesses = generator.generate_batch(
             functions=functions,
-            usage_contexts=context.usage_contexts or None,
+            usage_contexts=usage_contexts,
             use_llm=llm is not None,
-            max_targets=max_targets,
+            max_targets=None,
+            ordered_items=ordered_items,
+            use_subdirs=use_subdirs,
         )
 
         # Validate harnesses
@@ -97,11 +120,13 @@ class GenerateStage:
         valid_count = sum(1 for h in harnesses if h.is_valid)
         log.info("Generated %d harnesses (%d valid)", len(harnesses), valid_count)
 
-        # Write harnesses to files
+        # Write harnesses to files (optionally in api/, usage_contexts/, other/)
         written_paths: list[Path] = []
         if context.config.get("write_harnesses", True):
             try:
-                written_paths = generator.write_harnesses(harnesses, output_dir)
+                written_paths = generator.write_harnesses(
+                    harnesses, output_dir, use_subdirs=use_subdirs
+                )
                 log.info("Wrote %d harness files to %s", len(written_paths), output_dir)
             except Exception as e:
                 log.warning("Failed to write harnesses: %s", e)

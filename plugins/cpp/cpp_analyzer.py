@@ -93,13 +93,20 @@ class CppAnalyzer:
     def __init__(self) -> None:
         self._query_dir = Path(__file__).resolve().parent
         self._list_functions_ql = self._query_dir / "list_functions.ql"
+        self._api_functions_ql = self._query_dir / "api_functions.ql"
+        self._fuzz_targets_ql = self._query_dir / "fuzz_targets.ql"
+        self._parameter_semantics_ql = self._query_dir / "parameter_semantics.ql"
         self._runner = CodeQLRunner(codeql_bin=_codeql_bin())
 
     def get_codeql_queries(self) -> list[Path]:
-        """Return paths to CodeQL query files (list_functions.ql in plugins/cpp/)."""
-        if self._list_functions_ql.exists():
-            return [self._list_functions_ql]
-        return []
+        """Return paths to CodeQL query files: list_functions, api_functions, fuzz_targets, parameter_semantics."""
+        out: list[Path] = []
+        for q in (self._list_functions_ql, self._api_functions_ql, self._fuzz_targets_ql, self._parameter_semantics_ql):
+            if q.exists():
+                out.append(q)
+        if not out:
+            out = [self._list_functions_ql] if self._list_functions_ql.exists() else []
+        return out
 
     def extract_functions(self, db_path: Path) -> list[FunctionInfo]:
         """Run CodeQL list_functions query, decode BQRS to CSV, parse into FunctionInfo."""
@@ -143,60 +150,69 @@ class CppAnalyzer:
                 )
             return []
 
-        # Find BQRS under db/results (e.g. results/list_functions/default/results.bqrs)
+        # Find BQRS under db/results; identify each by path (list_functions, api_functions, fuzz_targets, parameter_semantics)
         results_dir = db / "results"
         bqrs_files = list(results_dir.rglob("*.bqrs")) if results_dir.is_dir() else []
         if not bqrs_files:
             log.warning("No BQRS files under %s", results_dir)
             return []
 
-        functions: list[FunctionInfo] = []
         codeql_bin = _codeql_bin()
+        api_set: set[tuple[str, int, str]] = set()
+        fuzz_set: set[tuple[str, int, str]] = set()
+        semantics_map: dict[tuple[str, int, str], list[str]] = {}
+
+        def decode_bqrs(bqrs_path: Path) -> str:
+            res = subprocess.run(
+                [codeql_bin, "bqrs", "decode", "--format=csv", "--no-titles", "--", str(bqrs_path)],
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
+            if res.returncode != 0:
+                return ""
+            return (res.stdout or b"").decode("utf-8", errors="replace")
+
+        def query_kind(path: Path) -> str:
+            s = path.as_posix()
+            if "list_functions" in s:
+                return "list_functions"
+            if "api_functions" in s:
+                return "api_functions"
+            if "fuzz_targets" in s:
+                return "fuzz_targets"
+            if "parameter_semantics" in s:
+                return "parameter_semantics"
+            return ""
+
+        functions_list: list[FunctionInfo] = []
         for bqrs_path in bqrs_files:
+            kind = query_kind(bqrs_path)
+            if not kind:
+                continue
             try:
-                decode_result = subprocess.run(
-                    [
-                        codeql_bin,
-                        "bqrs",
-                        "decode",
-                        "--format=csv",
-                        "--no-titles",
-                        "--",
-                        str(bqrs_path),
-                    ],
-                    capture_output=True,
-                    timeout=120,
-                    check=False,
-                )
-                if decode_result.returncode != 0:
-                    log.debug("bqrs decode failed for %s: %s", bqrs_path, decode_result.stderr)
+                csv_text = decode_bqrs(bqrs_path)
+                if not csv_text:
                     continue
-                csv_text = (decode_result.stdout or b"").decode("utf-8", errors="replace")
                 reader = csv.reader(csv_text.strip().splitlines())
-                # Columns from list_functions.ql:
-                # file_path, line, name, qualified_name, return_type, param_count, parameters, is_public
                 for row in reader:
-                    if len(row) >= 4:
-                        file_path = (row[0] or "").strip()
-                        try:
-                            line = int(row[1]) if row[1].strip() else 0
-                        except ValueError:
-                            line = 0
-                        name = (row[2] or "").strip()
+                    if len(row) < 4:
+                        continue
+                    file_path = (row[0] or "").strip()
+                    try:
+                        line = int(row[1]) if row[1].strip() else 0
+                    except ValueError:
+                        line = 0
+                    name = (row[2] or "").strip()
+                    key = (file_path, line, name)
+
+                    if kind == "list_functions":
                         qualified_name = (row[3] or "").strip() or name
                         return_type = (row[4] or "").strip() if len(row) > 4 else ""
-                        # param_count at row[5], not directly needed
                         params_str = (row[6] or "").strip() if len(row) > 6 else ""
-                        # Parse parameters: "type1 name1, type2 name2" -> list of strings
-                        parameters: list[str] = []
-                        if params_str:
-                            for param in params_str.split(", "):
-                                param = param.strip()
-                                if param:
-                                    parameters.append(param)
-                        # Build signature: "return_type qualified_name(params)"
+                        parameters = [p.strip() for p in params_str.split(",") if p.strip()]
                         signature = f"{return_type} {qualified_name}({params_str})"
-                        functions.append(
+                        functions_list.append(
                             FunctionInfo(
                                 name=name,
                                 signature=signature,
@@ -208,9 +224,75 @@ class CppAnalyzer:
                                 context="",
                             )
                         )
-            except (subprocess.TimeoutExpired, OSError) as e:
-                log.debug("Decode/parse error for %s: %s", bqrs_path, e)
-        return functions
+                    elif kind == "api_functions":
+                        api_set.add(key)
+                    elif kind == "fuzz_targets":
+                        fuzz_set.add(key)
+                    elif kind == "parameter_semantics":
+                        # row: file_path, line, name, param_index, semantic_role
+                        param_index = int(row[3]) if len(row) > 3 and row[3].strip() else 0
+                        semantic_role = (row[4] or "UNKNOWN").strip() if len(row) > 4 else "UNKNOWN"
+                        if key not in semantics_map:
+                            semantics_map[key] = []
+                        # Extend list so index param_index is at position param_index
+                        while len(semantics_map[key]) <= param_index:
+                            semantics_map[key].append("UNKNOWN")
+                        semantics_map[key][param_index] = semantic_role
+            except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+                log.debug("Decode/parse error for %s (%s): %s", bqrs_path, kind, e)
+
+        # If we only have auxiliary queries (api, fuzz, parameter_semantics) and no list_functions, run list_functions alone
+        if not functions_list and (api_set or fuzz_set or semantics_map):
+            queries_only_list = [self._list_functions_ql]
+            result2 = self._runner.run_queries(db, queries_only_list, timeout=600, search_path=search_path if search_path else None)
+            if result2.returncode == 0:
+                bqrs_again = list((db / "results").rglob("*.bqrs"))
+                for bqrs_path in bqrs_again:
+                    if "list_functions" not in bqrs_path.as_posix():
+                        continue
+                    csv_text = decode_bqrs(bqrs_path)
+                    if not csv_text:
+                        continue
+                    for row in csv.reader(csv_text.strip().splitlines()):
+                        if len(row) < 4:
+                            continue
+                        file_path = (row[0] or "").strip()
+                        try:
+                            line = int(row[1]) if row[1].strip() else 0
+                        except ValueError:
+                            line = 0
+                        name = (row[2] or "").strip()
+                        qualified_name = (row[3] or "").strip() or name
+                        return_type = (row[4] or "").strip() if len(row) > 4 else ""
+                        params_str = (row[6] or "").strip() if len(row) > 6 else ""
+                        parameters = [p.strip() for p in params_str.split(",") if p.strip()]
+                        signature = f"{return_type} {qualified_name}({params_str})"
+                        functions_list.append(
+                            FunctionInfo(
+                                name=name,
+                                signature=signature,
+                                return_type=return_type,
+                                parameters=parameters,
+                                file_path=file_path,
+                                line=line,
+                                includes=[],
+                                context="",
+                            )
+                        )
+                    break
+
+        # Merge: tag each function with is_api, is_fuzz_target_candidate, parameter_semantics
+        for fn in functions_list:
+            key = (fn.file_path, fn.line, fn.name)
+            fn.is_api = key in api_set
+            fn.is_fuzz_target_candidate = key in fuzz_set
+            roles = semantics_map.get(key, [])
+            # Align with parameters: one semantic role per parameter
+            fn.parameter_semantics = [
+                roles[i] if i < len(roles) else "UNKNOWN"
+                for i in range(len(fn.parameters))
+            ]
+        return functions_list
 
     def extract_usage_contexts(self, db_path: Path) -> list[UsageContext]:
         """Extract usage contexts (call sequences). Not implemented; returns empty list."""

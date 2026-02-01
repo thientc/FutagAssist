@@ -71,6 +71,7 @@ The C++ analyzer includes several CodeQL queries in `plugins/cpp/` for extractin
 | `list_functions.ql` | **Main query.** Extracts all functions with details: file path, line, name, qualified name, return type, parameters, and whether public (header-declared or external linkage). |
 | `api_functions.ql` | Identifies **public API functions** suitable for fuzzing. Scores functions based on: header declaration, external linkage, pointer parameters, size parameters, and input-processing names. |
 | `fuzz_targets.ql` | Finds **ideal fuzz target candidates**: functions that take (buffer, size) pairs, C strings, or file handles. Prioritizes input-processing functions (parse, read, decode, etc.). |
+| `parameter_semantics.ql` | Classifies each **parameter by semantic role** (FILE_PATH, FILE_HANDLE, URL, CALLBACK, USERDATA, OUTPUT_BUFFER, etc.) from name and type. Used to attach `parameter_semantics` to `FunctionInfo`; the generate stage uses this to emit temp-file or nullptr code. |
 | `function_calls.ql` | Extracts **caller → callee relationships** to understand call graphs and build usage contexts (init → process → cleanup sequences). |
 | `init_cleanup_pairs.ql` | Identifies **init/cleanup function pairs** (e.g. `open`/`close`, `alloc`/`free`, `create`/`destroy`) that should be called together in fuzz harnesses. |
 | `includes.ql` | Extracts **#include directives** per source file for generating complete fuzz harnesses with proper headers. |
@@ -89,6 +90,21 @@ The `fuzz_targets.ql` query assigns a **fuzz score** to each function:
 | Non-static | +2 |
 
 Functions with score ≥ 5 are returned, sorted by score descending.
+
+### Parameter semantics
+
+The `parameter_semantics.ql` query assigns a **semantic role** to each function parameter (one per parameter, in order). Roles are used by the generate stage to produce appropriate harness code:
+
+| Role | Description | Harness behavior |
+|------|-------------|------------------|
+| FILE_PATH | Filename/path parameter (e.g. `filename`, `path`) | Create temp file from fuzz input, pass path; optional unlink. |
+| FILE_HANDLE | File handle (e.g. `FILE*`, `int fd`) | Create temp file, open handle, pass to function; `fclose` after call. |
+| CONFIG_PATH, URL | Config path or URL parameter | Treated like FILE_PATH (temp file, pass path). |
+| CALLBACK, USERDATA | Callback or userdata pointer | Pass `nullptr` (or TODO). |
+| OUTPUT_BUFFER, INOUT_BUFFER | Output/inout buffer | Type-based consumption. |
+| UNKNOWN | No semantic match | Type-based consumption. |
+
+`FunctionInfo.parameter_semantics` is a list of strings, one per parameter, aligned with `FunctionInfo.parameters`.
 
 ### API function scoring
 
