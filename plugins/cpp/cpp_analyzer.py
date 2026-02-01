@@ -173,7 +173,8 @@ class CppAnalyzer:
                     continue
                 csv_text = (decode_result.stdout or b"").decode("utf-8", errors="replace")
                 reader = csv.reader(csv_text.strip().splitlines())
-                # Columns: file_path, line, name, signature (from list_functions.ql)
+                # Columns from list_functions.ql:
+                # file_path, line, name, qualified_name, return_type, param_count, parameters, is_public
                 for row in reader:
                     if len(row) >= 4:
                         file_path = (row[0] or "").strip()
@@ -182,13 +183,25 @@ class CppAnalyzer:
                         except ValueError:
                             line = 0
                         name = (row[2] or "").strip()
-                        signature = (row[3] or "").strip() or name
+                        qualified_name = (row[3] or "").strip() or name
+                        return_type = (row[4] or "").strip() if len(row) > 4 else ""
+                        # param_count at row[5], not directly needed
+                        params_str = (row[6] or "").strip() if len(row) > 6 else ""
+                        # Parse parameters: "type1 name1, type2 name2" -> list of strings
+                        parameters: list[str] = []
+                        if params_str:
+                            for param in params_str.split(", "):
+                                param = param.strip()
+                                if param:
+                                    parameters.append(param)
+                        # Build signature: "return_type qualified_name(params)"
+                        signature = f"{return_type} {qualified_name}({params_str})"
                         functions.append(
                             FunctionInfo(
                                 name=name,
                                 signature=signature,
-                                return_type="",
-                                parameters=[],
+                                return_type=return_type,
+                                parameters=parameters,
                                 file_path=file_path,
                                 line=line,
                                 includes=[],

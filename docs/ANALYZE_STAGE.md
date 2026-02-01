@@ -62,6 +62,46 @@ futagassist analyze --db <PATH> [--output <JSON_PATH>] [--language <LANG>]
 - **CodeQL runner** (`src/futagassist/analysis/codeql_runner.py`): Utility to run CodeQL queries against a database (`codeql database run-queries`). Language analyzers can use it to run `.ql` files and parse results into `FunctionInfo`.
 - **Context builder** (`src/futagassist/analysis/context_builder.py`): `enrich_functions(functions, repo_path, ...)` fills `FunctionInfo.context` with source lines around each function’s `file_path` and `line` (configurable `before_lines` / `after_lines`).
 
+## CodeQL queries for C/C++
+
+The C++ analyzer includes several CodeQL queries in `plugins/cpp/` for extracting function information:
+
+| Query | Description |
+|-------|-------------|
+| `list_functions.ql` | **Main query.** Extracts all functions with details: file path, line, name, qualified name, return type, parameters, and whether public (header-declared or external linkage). |
+| `api_functions.ql` | Identifies **public API functions** suitable for fuzzing. Scores functions based on: header declaration, external linkage, pointer parameters, size parameters, and input-processing names. |
+| `fuzz_targets.ql` | Finds **ideal fuzz target candidates**: functions that take (buffer, size) pairs, C strings, or file handles. Prioritizes input-processing functions (parse, read, decode, etc.). |
+| `function_calls.ql` | Extracts **caller → callee relationships** to understand call graphs and build usage contexts (init → process → cleanup sequences). |
+| `init_cleanup_pairs.ql` | Identifies **init/cleanup function pairs** (e.g. `open`/`close`, `alloc`/`free`, `create`/`destroy`) that should be called together in fuzz harnesses. |
+| `includes.ql` | Extracts **#include directives** per source file for generating complete fuzz harnesses with proper headers. |
+| `function_details.ql` | Detailed function info including static/inline/virtual qualifiers. |
+
+### Fuzz target scoring
+
+The `fuzz_targets.ql` query assigns a **fuzz score** to each function:
+
+| Criterion | Score |
+|-----------|-------|
+| Takes (buffer, size) pair | +10 |
+| Takes C string | +5 |
+| Input-processing name (parse, read, decode...) | +5 |
+| Public API (declared in header) | +3 |
+| Non-static | +2 |
+
+Functions with score ≥ 5 are returned, sorted by score descending.
+
+### API function scoring
+
+The `api_functions.ql` query assigns an **API score**:
+
+| Criterion | Score |
+|-----------|-------|
+| Declared in header | +3 |
+| External linkage | +2 |
+| Takes pointer parameter | +2 |
+| Takes size parameter | +1 |
+| Input-processing name | +2 |
+
 ## CodeQL bundle (required)
 
 The C++ analyzer runs a CodeQL query that `import cpp`. This requires the **CodeQL bundle** (not the standalone CLI), which includes language packs like `codeql/cpp-all`.
