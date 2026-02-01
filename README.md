@@ -2,6 +2,40 @@
 
 An intelligent assistant that leverages CodeQL's semantic code analysis and Large Language Models to automatically generate high-quality fuzz targets, dramatically reducing the manual effort required for comprehensive fuzzing campaigns.
 
+## Quick Start
+
+```bash
+# 1. Install FutagAssist
+pip install -e .
+
+# 2. Install CodeQL bundle (required)
+# See: docs/BUILD_WITH_CODEQL.md#installing-the-codeql-bundle
+export CODEQL_HOME=/path/to/codeql-bundle
+
+# 3. Build a library with CodeQL
+futagassist build --repo /path/to/library
+
+# 4. Analyze to extract function info
+futagassist analyze --db /path/to/library/codeql-db --output functions.json
+```
+
+## Pipeline Overview
+
+```
+build → analyze → generate → compile → fuzz → report
+```
+
+| Stage | Command | Description |
+|-------|---------|-------------|
+| **Build** | `futagassist build` | Build library with CodeQL, create database |
+| **Analyze** | `futagassist analyze` | Extract functions, API info, fuzz candidates |
+| Generate | *(coming soon)* | Generate fuzz harnesses using LLM |
+| Compile | *(coming soon)* | Compile harnesses with sanitizers |
+| Fuzz | *(coming soon)* | Run fuzzing campaign |
+| Report | *(coming soon)* | Generate coverage/crash reports |
+
+---
+
 ## How to build a library with CodeQL
 
 FutagAssist can build a C/C++ (or Python) library and create a **CodeQL database** in one step. It infers build steps from the project’s README/INSTALL and runs the build under `codeql database create`.
@@ -41,6 +75,48 @@ futagassist build --repo libs/zlib --language c
 ```
 
 See [docs/BUILD_WITH_CODEQL.md](docs/BUILD_WITH_CODEQL.md) for more detail and troubleshooting.
+
+---
+
+## Analyze a CodeQL database
+
+After building, use `futagassist analyze` to extract function information for fuzz target generation.
+
+```bash
+# Analyze and print function count
+futagassist analyze --db /path/to/codeql-db
+
+# Analyze and export to JSON
+futagassist analyze --db /path/to/codeql-db --output functions.json
+```
+
+**What it extracts:**
+
+- **Function details:** name, signature, return type, parameters, file path, line number
+- **API functions:** public functions suitable for fuzzing (header-declared, external linkage)
+- **Fuzz target candidates:** functions taking (buffer, size) pairs, C strings, or file handles
+- **Call relationships:** caller → callee for understanding usage patterns
+- **Init/cleanup pairs:** matching pairs like `open`/`close`, `alloc`/`free`
+
+**Example output (`functions.json`):**
+
+```json
+{
+  "functions": [
+    {
+      "name": "png_read_image",
+      "signature": "void png_read_image(png_structrp png_ptr, png_bytepp image)",
+      "return_type": "void",
+      "parameters": ["png_structrp png_ptr", "png_bytepp image"],
+      "file_path": "pngread.c",
+      "line": 734
+    }
+  ],
+  "usage_contexts": []
+}
+```
+
+See [docs/ANALYZE_STAGE.md](docs/ANALYZE_STAGE.md) for the full list of CodeQL queries and scoring criteria.
 
 ---
 
