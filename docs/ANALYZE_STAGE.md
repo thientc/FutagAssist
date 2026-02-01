@@ -17,7 +17,7 @@ This guide describes the **Analysis** pipeline stage: extracting function inform
    - Create one with `futagassist build --repo <path>` (see [BUILD_WITH_CODEQL.md](BUILD_WITH_CODEQL.md)).
 
 2. **Language analyzer**
-   - A **LanguageAnalyzer** must be registered for your language (e.g. `cpp`, `c`, `python`). Built-in language plugins are planned in Phase 7; until then, load a plugin from `plugins/` that calls `registry.register_language("<lang>", YourAnalyzer)`.
+   - A **LanguageAnalyzer** must be registered for your language (e.g. `cpp`, `c`, `python`). A **C++ analyzer** is provided in `plugins/cpp/cpp_analyzer.py`; run `futagassist analyze` from the project root (where `plugins/` exists) so it is loaded. For other languages, add a plugin that calls `registry.register_language("<lang>", YourAnalyzer)`.
    - Run `futagassist plugins list` to see registered **Language analyzers**.
 
 3. **Optional: LLM**
@@ -61,6 +61,36 @@ futagassist analyze --db <PATH> [--output <JSON_PATH>] [--language <LANG>]
 
 - **CodeQL runner** (`src/futagassist/analysis/codeql_runner.py`): Utility to run CodeQL queries against a database (`codeql database run-queries`). Language analyzers can use it to run `.ql` files and parse results into `FunctionInfo`.
 - **Context builder** (`src/futagassist/analysis/context_builder.py`): `enrich_functions(functions, repo_path, ...)` fills `FunctionInfo.context` with source lines around each function’s `file_path` and `line` (configurable `before_lines` / `after_lines`).
+
+## CodeQL bundle (required)
+
+The C++ analyzer runs a CodeQL query that `import cpp`. This requires the **CodeQL bundle** (not the standalone CLI), which includes language packs like `codeql/cpp-all`.
+
+**For installation instructions, see [BUILD_WITH_CODEQL.md - Installing the CodeQL Bundle](BUILD_WITH_CODEQL.md#installing-the-codeql-bundle).**
+
+### Quick verification
+
+After installing the bundle, verify with:
+
+```bash
+# Check that packs are found
+codeql resolve packs | grep cpp-all
+
+# Check the pack directory exists
+ls -la $CODEQL_HOME/qlpacks/codeql/cpp-all/
+```
+
+### Troubleshooting "could not resolve module cpp"
+
+This error means CodeQL cannot find the `codeql/cpp-all` language pack. Common causes:
+
+| Cause | Solution |
+|-------|----------|
+| Using standalone CLI instead of bundle | Download the **bundle** from [codeql-bundle releases](https://github.com/github/codeql-action/releases) (tags like `codeql-bundle-v2.20.0`). |
+| `CODEQL_HOME` not set or wrong | Set `CODEQL_HOME` to the directory containing both the `codeql` binary and the `qlpacks/` folder. |
+| Packs not extracted correctly | Verify `$CODEQL_HOME/qlpacks/codeql/cpp-all/` exists with `ls`. |
+
+Run `codeql resolve packs` to see if CodeQL can find its packs. If it shows nothing, the bundle is not installed correctly.
 
 ## Optional: LLM-assisted usage context suggestion
 

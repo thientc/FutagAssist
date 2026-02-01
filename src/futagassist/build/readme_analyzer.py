@@ -212,3 +212,37 @@ class ReadmeAnalyzer:
         commands = [c.strip() for c in cmd.split(" && ") if c.strip()]
         log.info("Build commands (list): %s", commands)
         return commands
+
+    def extract_clean_command(self, repo_path: Path) -> str:
+        """
+        Infer a clean command from the repo (for use with --overwrite).
+        Returns a single shell command to run from repo root, or empty if unknown.
+        """
+        log = get_logger()
+        repo_path = Path(repo_path).resolve()
+        if not repo_path.is_dir():
+            return ""
+
+        # Same file-based detection as build: autotools -> make clean, meson -> ninja -C build -t clean, cmake -> clean in build dir
+        configure_script = repo_path / "configure"
+        has_configure_ac = (repo_path / "configure.ac").is_file()
+        has_makefile_am = (repo_path / "Makefile.am").is_file()
+        autogen = repo_path / "autogen.sh"
+
+        if configure_script.exists() and configure_script.is_file():
+            log.info("Clean command (configure): make clean")
+            return "make clean"
+        if (has_configure_ac or has_makefile_am) and autogen.is_file():
+            log.info("Clean command (autotools): make clean")
+            return "make clean"
+        if (repo_path / "meson.build").is_file():
+            # ninja -C build -t clean removes built files; "ninja -C build clean" if clean target exists
+            log.info("Clean command (meson): ninja -C build -t clean")
+            return "ninja -C build -t clean"
+        if (repo_path / "CMakeLists.txt").is_file() and not has_configure_ac and not configure_script.exists():
+            log.info("Clean command (cmake): cmake --build build --target clean")
+            return "cmake --build build --target clean"
+
+        # Default: make clean (safe no-op if no Makefile)
+        log.info("Clean command (default): make clean")
+        return "make clean"

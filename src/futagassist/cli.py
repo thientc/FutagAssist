@@ -51,24 +51,39 @@ def main() -> None:
 
 
 @main.command()
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output.")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed output (paths, suggestions).")
 @click.option("--skip-llm", is_flag=True, help="Skip LLM connectivity check.")
 @click.option("--skip-fuzzer", is_flag=True, help="Skip fuzzer engine check.")
-def check(verbose: bool, skip_llm: bool, skip_fuzzer: bool) -> None:
-    """Verify CodeQL, LLM, and fuzzer setup."""
+@click.option("--skip-plugins", is_flag=True, help="Skip plugins / language analyzer check.")
+def check(verbose: bool, skip_llm: bool, skip_fuzzer: bool, skip_plugins: bool) -> None:
+    """Verify CodeQL, LLM, plugins, and fuzzer setup; show suggestions for failures."""
     config, registry = _load_env_and_plugins()
     checker = HealthChecker(config=config, registry=registry)
-    results = checker.check_all(skip_llm=skip_llm, skip_fuzzer=skip_fuzzer)
+    results = checker.check_all(
+        skip_llm=skip_llm,
+        skip_fuzzer=skip_fuzzer,
+        skip_plugins=skip_plugins,
+        verify_codeql_packs=verbose,
+    )
     all_ok = all(r.ok for r in results)
     for r in results:
         status = "OK" if r.ok else "FAIL"
         click.echo(f"  {r.name}: {status}")
         if verbose or not r.ok:
             click.echo(f"    {r.message}")
+        if (verbose or not r.ok) and r.suggestion:
+            click.echo(f"    → {r.suggestion}")
     if all_ok:
-        click.echo("All checks passed.")
+        # Show any non-fatal hints (e.g. CodeQL packs suggestion when version OK but packs missing)
+        hints = [r.suggestion for r in results if r.suggestion and r.ok]
+        if hints:
+            click.echo("All checks passed. Hints:")
+            for h in hints:
+                click.echo(f"  → {h}")
+        else:
+            click.echo("All checks passed.")
     else:
-        click.echo("Some checks failed.", err=True)
+        click.echo("Some checks failed. Fix the issues above or follow the suggested steps.", err=True)
         raise SystemExit(1)
 
 

@@ -19,6 +19,7 @@ class CodeQLRunner:
         *,
         threads: int | None = None,
         timeout: int = 600,
+        search_path: Path | list[Path] | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         """
         Run one or more CodeQL queries against the database.
@@ -27,6 +28,11 @@ class CodeQLRunner:
 
         Results are written into the database results directory; use bqrs decode
         or database interpret-results to read them. Returns the completed process.
+
+        search_path: Directory (or list of dirs) where CodeQL finds QL packs (e.g. the
+        CodeQL bundle root containing qlpacks/). Required for standalone .ql files that
+        import language modules (e.g. cpp). Use the extraction root of the CodeQL
+        bundle (see BUILD_WITH_CODEQL.md).
         """
         db_path = Path(db_path).resolve()
         if not db_path.is_dir():
@@ -37,6 +43,11 @@ class CodeQLRunner:
             "database",
             "run-queries",
         ]
+        if search_path is not None:
+            paths = [search_path] if isinstance(search_path, Path) else list(search_path)
+            path_str = ":".join(str(Path(p).resolve()) for p in paths if Path(p).exists())
+            if path_str:
+                args.append(f"--search-path={path_str}")
         if threads is not None:
             args.append(f"--threads={threads}")
         args.append("--")

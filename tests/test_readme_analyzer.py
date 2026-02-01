@@ -127,3 +127,30 @@ def test_readme_analyzer_install_prefix_meson(tmp_path: Path) -> None:
     assert "meson" in full and "ninja" in full
     assert "install" in full
     assert "--prefix=" in full
+
+
+def test_readme_analyzer_extract_clean_command_configure(tmp_path: Path) -> None:
+    """extract_clean_command returns make clean for configure-based projects."""
+    (tmp_path / "configure").write_text("#!/bin/sh\ntrue")
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    assert analyzer.extract_clean_command(tmp_path) == "make clean"
+
+
+def test_readme_analyzer_extract_clean_command_meson(tmp_path: Path) -> None:
+    """extract_clean_command returns ninja -C build -t clean for Meson."""
+    (tmp_path / "meson.build").write_text("project('foo', 'c')")
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    assert analyzer.extract_clean_command(tmp_path) == "ninja -C build -t clean"
+
+
+def test_readme_analyzer_extract_clean_command_cmake(tmp_path: Path) -> None:
+    """extract_clean_command returns cmake --build build --target clean for CMake."""
+    (tmp_path / "CMakeLists.txt").write_text("project(foo)")
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    assert analyzer.extract_clean_command(tmp_path) == "cmake --build build --target clean"
+
+
+def test_readme_analyzer_extract_clean_command_default(tmp_path: Path) -> None:
+    """extract_clean_command returns make clean when build system unknown."""
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    assert analyzer.extract_clean_command(tmp_path) == "make clean"

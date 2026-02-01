@@ -91,6 +91,33 @@ class BuildOrchestrator:
         log.info("=== CodeQL build ===")
         log.info("Full build command: %s", full_build_cmd)
 
+        # When overwrite is set, run a clean step first so the rebuild is from a clean tree.
+        if overwrite and build_script is None:
+            clean_cmd = self._analyzer.extract_clean_command(repo_path)
+            if clean_cmd:
+                log.info("Overwrite requested: running clean first: %s", clean_cmd)
+                try:
+                    clean_result = subprocess.run(
+                        clean_cmd,
+                        shell=True,
+                        cwd=str(repo_path),
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+                    if clean_result.returncode == 0:
+                        log.info("Clean succeeded (exit 0)")
+                    else:
+                        log.warning(
+                            "Clean failed (exit %s); continuing with build. stderr: %s",
+                            clean_result.returncode,
+                            (clean_result.stderr or clean_result.stdout or "")[:500],
+                        )
+                except subprocess.TimeoutExpired:
+                    log.warning("Clean timed out (120s); continuing with build")
+                except Exception as e:
+                    log.warning("Clean failed: %s; continuing with build", e)
+
         for attempt in range(self._max_retries):
             if use_temp_script:
                 # CodeQL's runner splits --command by space and execs the first token;

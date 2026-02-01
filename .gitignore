@@ -211,8 +211,9 @@ libs/
 
 # FutagAssist: include build package (exception to generic build/ ignore)
 !src/futagassist/build/
-
-
+src/futagassist/build/__pycache__/
+src/futagassist/build/__pycache__/**/
 # FutagAssist: misc
 .agents/
 uv.lock
+prereqs/codeql-bundle-linux64.tar.gz

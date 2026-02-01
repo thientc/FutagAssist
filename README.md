@@ -8,7 +8,7 @@ FutagAssist can build a C/C++ (or Python) library and create a **CodeQL database
 
 **Prerequisites:**
 
-- [CodeQL CLI](https://codeql.github.com/docs/codeql-cli/) on your PATH, or `CODEQL_HOME` set (e.g. in `.env`)
+- **CodeQL bundle** (**required**, not the standalone CLI) — includes the CLI and language packs (e.g. `codeql/cpp-all`). See [Installing the CodeQL Bundle](docs/BUILD_WITH_CODEQL.md#installing-the-codeql-bundle) for step-by-step instructions.
 - The library’s build dependencies installed (e.g. autotools, cmake, compilers)
 - Optional: LLM configured (see [Adding an LLM plugin](docs/LLM_PLUGINS.md); e.g. `.env` with `OPENAI_API_KEY` and `LLM_PROVIDER=openai`) for better build-step extraction and failure fixes
 
@@ -41,6 +41,30 @@ futagassist build --repo libs/zlib --language c
 ```
 
 See [docs/BUILD_WITH_CODEQL.md](docs/BUILD_WITH_CODEQL.md) for more detail and troubleshooting.
+
+---
+
+## Verify setup (CodeQL, LLM, plugins)
+
+Run `futagassist check` to verify that CodeQL, the configured LLM, plugins (e.g. language analyzers), and the fuzzer engine are working. Failed checks include **suggestions** (paths to set, env vars, or next steps).
+
+```bash
+# Full check (CodeQL, plugins, LLM, fuzzer)
+futagassist check
+
+# Verbose: show paths and verify CodeQL can resolve QL packs (e.g. cpp)
+futagassist check -v
+
+# Skip optional checks
+futagassist check --skip-llm --skip-fuzzer --skip-plugins
+```
+
+**What is checked:**
+
+- **codeql** — CLI available and version; with `-v`, also that the cpp pack can be resolved (needed for `futagassist analyze`). Suggests `CODEQL_HOME` or adding the bundle to PATH if missing.
+- **plugins** — `plugins/` exists and a language analyzer is registered for the configured language (e.g. cpp). Suggests running from the project root or adding `plugins/cpp/`.
+- **llm** — Configured provider is registered and `check_health()` passes. Suggests `OPENAI_API_KEY` in `.env` when relevant.
+- **fuzzer** — Selected engine (e.g. libfuzzer) is registered and clang is available. Suggests installing LLVM/clang.
 
 ---
 

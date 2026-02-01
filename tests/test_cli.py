@@ -50,12 +50,12 @@ def register(registry):
 
 
 def test_cli_check_exits_nonzero_when_fail(runner: CliRunner, tmp_path: Path) -> None:
-    """check command runs; exits 1 when codeql check fails, 0 when all pass."""
+    """check command runs; exits 1 when codeql or plugins check fails, 0 when all pass."""
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
     with runner.isolated_filesystem(temp_dir=tmp_path):
         result = runner.invoke(
             main,
-            ["check", "--skip-llm", "--skip-fuzzer"],
+            ["check", "--skip-llm", "--skip-fuzzer", "--skip-plugins"],
             catch_exceptions=False,
         )
         assert result.exit_code in (0, 1)
@@ -63,12 +63,12 @@ def test_cli_check_exits_nonzero_when_fail(runner: CliRunner, tmp_path: Path) ->
 
 
 def test_cli_check_skip_options(runner: CliRunner, tmp_path: Path) -> None:
-    """check with --skip-llm and --skip-fuzzer runs only codeql check."""
+    """check with --skip-llm, --skip-fuzzer, --skip-plugins runs only codeql check."""
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
     with runner.isolated_filesystem(temp_dir=tmp_path):
         result = runner.invoke(
             main,
-            ["check", "--skip-llm", "--skip-fuzzer", "-v"],
+            ["check", "--skip-llm", "--skip-fuzzer", "--skip-plugins", "-v"],
             catch_exceptions=False,
         )
         assert "codeql" in result.output.lower()

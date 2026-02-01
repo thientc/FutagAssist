@@ -4,15 +4,95 @@ This guide explains how to use FutagAssist to build a C, C++, or Python library 
 
 ## Prerequisites
 
-1. **CodeQL CLI**
-   - Install from [CodeQL CLI](https://codeql.github.com/docs/codeql-cli/).
-   - Ensure `codeql` is on your PATH, or set `CODEQL_HOME` in `.env` (e.g. `CODEQL_HOME=/opt/codeql`).
+1. **CodeQL CLI (bundle required)**
+   - You **must** use the **CodeQL bundle** (not the standalone CLI). The bundle includes the CLI **and** language packs (e.g. `codeql/cpp-all`) required for `futagassist analyze`.
+   - See [Installing the CodeQL Bundle](#installing-the-codeql-bundle) below for step-by-step instructions.
 
 2. **Build environment**
    - The library’s normal build dependencies (e.g. autotools, CMake, Meson, compilers, Python) must be installed so the project can build on its own.
 
 3. **Optional: LLM**
    - For better extraction of build steps from README/INSTALL and for LLM-assisted fix suggestions on build failure, configure an LLM in `.env` (e.g. `OPENAI_API_KEY`, `LLM_PROVIDER=openai` or `ollama`).
+
+## Installing the CodeQL Bundle
+
+FutagAssist requires the **CodeQL bundle** (not the standalone CLI) because the bundle includes language packs like `codeql/cpp-all` that provide the `cpp` module for analysis.
+
+### Step 1: Download the bundle
+
+Go to the [CodeQL Action releases](https://github.com/github/codeql-action/releases) and download the **bundle** for your platform:
+
+| Platform | Asset name |
+|----------|------------|
+| Linux (x64) | `codeql-bundle-linux64.tar.zst` or `.tar.gz` |
+| macOS (x64) | `codeql-bundle-osx64.tar.zst` or `.tar.gz` |
+| Windows | `codeql-bundle-win64.zip` |
+
+**Important:** Download from a `codeql-bundle-vX.Y.Z` tag (e.g. `codeql-bundle-v2.20.0`), **not** the CodeQL Action release (v3.x / v4.x).
+
+### Step 2: Extract the bundle
+
+```bash
+# Linux example (using zstd for .tar.zst, or tar for .tar.gz)
+mkdir -p ~/codeql
+cd ~/codeql
+tar --zstd -xf ~/Downloads/codeql-bundle-linux64.tar.zst
+# Or for .tar.gz:
+# tar -xzf ~/Downloads/codeql-bundle-linux64.tar.gz
+```
+
+After extraction, you should have:
+
+```
+~/codeql/
+├── codeql              # The CodeQL CLI binary
+├── qlpacks/            # Language packs
+│   └── codeql/
+│       ├── cpp-all/    # C/C++ pack (with version subdirectory, e.g. 7.0.0/)
+│       ├── cpp-queries/
+│       ├── java-all/
+│       └── ...
+└── ...
+```
+
+### Step 3: Set environment variables
+
+Add to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+
+```bash
+export CODEQL_HOME=~/codeql
+export PATH="$CODEQL_HOME:$PATH"
+```
+
+Then reload:
+
+```bash
+source ~/.bashrc  # or ~/.zshrc
+```
+
+### Step 4: Verify the installation
+
+```bash
+# Check CLI version
+codeql version
+
+# Check that packs are found (should list codeql/cpp-all, codeql/cpp-queries, etc.)
+codeql resolve packs
+
+# Verify the cpp pack exists
+ls -la $CODEQL_HOME/qlpacks/codeql/cpp-all/
+```
+
+If `codeql resolve packs` shows the `codeql/cpp-all` pack, the installation is correct.
+
+### Troubleshooting installation
+
+| Problem | Solution |
+|---------|----------|
+| `codeql: command not found` | Ensure `$CODEQL_HOME` is set and `$CODEQL_HOME` is in `$PATH`. |
+| `codeql resolve packs` shows no packs | You may have the standalone CLI, not the bundle. Download the **bundle** from [codeql-bundle releases](https://github.com/github/codeql-action/releases). |
+| `could not resolve module cpp` during analyze | The `codeql/cpp-all` pack is missing. Verify `$CODEQL_HOME/qlpacks/codeql/cpp-all/` exists. |
+| Packs are in a different location | Set `CODEQL_HOME` to the directory that contains both the `codeql` binary and the `qlpacks/` folder. |
 
 ## Command
 
@@ -41,6 +121,7 @@ futagassist build --repo <PATH> [--output <DB_PATH>] [--language <LANG>] [--over
    - The inferred command is run under CodeQL:
      - `codeql database create <output> --language <lang> --command="<build-command>" --source-root <repo>`
    - The build runs from the repo root; the database is written to `--output` (or `<repo>/codeql-db`).
+   - **`--overwrite`** replaces the CodeQL database directory and runs a **clean step** before building: FutagAssist infers a clean command from the build system (e.g. `make clean` for autotools, `ninja -C build -t clean` for Meson, `cmake --build build --target clean` for CMake) and runs it from the repo root. If the clean step fails (e.g. no Makefile yet), the build continues anyway. When using **`--build-script`**, no clean step is run.
 
 3. **Failure handling**
    - If the build fails and an LLM is configured, FutagAssist asks for a single fix command (e.g. install a package) and prints it. In **interactive** mode (stdin is a TTY and you did not pass `--no-interactive`), the CLI may prompt: *Run this fix and retry build? [y/N]*. If you answer yes, it runs the fix command in the repo root and retries the build once. If you answer no, or if you use `--no-interactive` (e.g. in CI), it exits with an error and the last build log is shown; you can run the suggested command manually and re-run `futagassist build`.

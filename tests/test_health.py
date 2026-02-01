@@ -25,9 +25,9 @@ def test_health_checker_check_codeql_found() -> None:
     config.load()
     registry = ComponentRegistry()
     checker = HealthChecker(config=config, registry=registry)
-    with patch("subprocess.run") as m:
-        m.return_value = type("R", (), {"returncode": 0, "stdout": "2.15.0", "stderr": ""})()
-        result = checker.check_codeql()
+    with patch("futagassist.core.health._run_cmd") as m:
+        m.return_value = (True, "2.15.0")
+        result = checker.check_codeql(verify_packs=False)
     assert result.name == "codeql"
     assert result.ok is True
 
@@ -37,12 +37,13 @@ def test_health_checker_check_codeql_not_found() -> None:
     config.load()
     registry = ComponentRegistry()
     checker = HealthChecker(config=config, registry=registry)
-    with patch("subprocess.run") as m:
-        m.side_effect = FileNotFoundError()
+    with patch("futagassist.core.health._run_cmd") as m:
+        m.return_value = (False, "command not found")
         result = checker.check_codeql()
     assert result.name == "codeql"
     assert result.ok is False
     assert "not found" in result.message or "command" in result.message.lower()
+    assert result.suggestion != ""
 
 
 def test_health_checker_check_llm_no_provider_registered() -> None:
@@ -54,6 +55,7 @@ def test_health_checker_check_llm_no_provider_registered() -> None:
     assert result.name == "llm"
     assert result.ok is False
     assert "openai" in result.message or "registered" in result.message.lower()
+    assert result.suggestion != ""
 
 
 def test_health_checker_check_llm_provider_ok() -> None:
@@ -76,6 +78,50 @@ def test_health_checker_check_fuzzer_not_registered() -> None:
     result = checker.check_fuzzer()
     assert result.name == "fuzzer"
     assert result.ok is False
+    assert result.suggestion != ""
+
+
+def test_health_checker_check_plugins_no_dir(tmp_path: Path) -> None:
+    """When plugins/ does not exist, check_plugins fails with suggestion."""
+    config = ConfigManager(project_root=tmp_path)
+    config.load()
+    registry = ComponentRegistry()
+    checker = HealthChecker(config=config, registry=registry)
+    result = checker.check_plugins()
+    assert result.name == "plugins"
+    assert result.ok is False
+    assert "plugins" in result.message.lower()
+    assert result.suggestion != ""
+
+
+def test_health_checker_check_plugins_no_analyzer_for_language(tmp_path: Path) -> None:
+    """When plugins/ exists but no analyzer for configured language, check_plugins fails."""
+    (tmp_path / "plugins").mkdir(parents=True)
+    config = ConfigManager(project_root=tmp_path)
+    config.load()
+    registry = ComponentRegistry()
+    checker = HealthChecker(config=config, registry=registry)
+    result = checker.check_plugins()
+    assert result.name == "plugins"
+    assert result.ok is False
+    assert "cpp" in result.message or "none" in result.message.lower()
+    assert result.suggestion != ""
+
+
+def test_health_checker_check_plugins_ok(tmp_path: Path) -> None:
+    """When plugins/ exists and cpp analyzer is registered, check_plugins passes."""
+    (tmp_path / "plugins" / "cpp").mkdir(parents=True)
+    config = ConfigManager(project_root=tmp_path)
+    config.load()
+    registry = ComponentRegistry()
+    # Register cpp so the check sees a language analyzer
+    from tests.test_analyze_stage import _MockLanguage
+    registry.register_language("cpp", _MockLanguage)
+    checker = HealthChecker(config=config, registry=registry)
+    result = checker.check_plugins()
+    assert result.name == "plugins"
+    assert result.ok is True
+    assert "cpp" in result.message or "analyzer" in result.message.lower()
 
 
 def test_health_checker_check_all_skip_llm() -> None:
@@ -83,6 +129,6 @@ def test_health_checker_check_all_skip_llm() -> None:
     config.load()
     registry = ComponentRegistry()
     checker = HealthChecker(config=config, registry=registry)
-    results = checker.check_all(skip_llm=True, skip_fuzzer=True)
+    results = checker.check_all(skip_llm=True, skip_fuzzer=True, skip_plugins=True)
     assert len(results) == 1
     assert results[0].name == "codeql"
