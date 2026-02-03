@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +14,7 @@ from futagassist.core.config import ConfigManager
 from futagassist.core.health import HealthChecker, HealthCheckResult
 from futagassist.core.plugin_loader import PluginLoader
 from futagassist.core.registry import ComponentRegistry
-from futagassist.core.schema import PipelineContext
+from futagassist.core.schema import FunctionInfo, PipelineContext, UsageContext
 from futagassist.reporters import register_builtin_reporters
 from futagassist.stages import register_builtin_stages
 
@@ -247,6 +248,95 @@ def analyze(db_path: Path, output_path: Path | None, language: str) -> None:
     click.echo(f"Analyzed {n} function(s).")
     if result.data.get("analyze_output"):
         click.echo(f"Wrote {result.data['analyze_output']}")
+
+
+@main.command()
+@click.option(
+    "--functions",
+    "functions_path",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Path to functions JSON file from analyze stage (contains 'functions' and optionally 'usage_contexts').",
+)
+@click.option(
+    "--output",
+    "output_dir",
+    type=click.Path(path_type=Path),
+    help="Output directory for generated harnesses (default: ./fuzz_targets).",
+)
+@click.option("--max-targets", type=int, default=None, help="Maximum number of harnesses to generate.")
+@click.option("--no-llm", is_flag=True, help="Disable LLM-based generation (template-only).")
+@click.option("--no-validate", is_flag=True, help="Skip syntax validation.")
+@click.option("--full-validate", is_flag=True, help="Use clang++ -fsyntax-only (slower, more accurate).")
+@click.option("--language", default="cpp", help="Language for harness generation (default: cpp).")
+@click.option(
+    "--no-subdirs",
+    is_flag=True,
+    help="Do not write category subdirectories (api/, usage_contexts/, other/).",
+)
+def generate(
+    functions_path: Path,
+    output_dir: Path | None,
+    max_targets: int | None,
+    no_llm: bool,
+    no_validate: bool,
+    full_validate: bool,
+    language: str,
+    no_subdirs: bool,
+) -> None:
+    """Generate fuzz harnesses from analyze-stage JSON."""
+    config, registry = _load_env_and_plugins()
+
+    try:
+        payload = json.loads(functions_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception as e:
+        click.echo(f"Failed to read/parse functions JSON: {e}", err=True)
+        raise SystemExit(1)
+
+    functions_raw = payload.get("functions") if isinstance(payload, dict) else payload
+    contexts_raw = payload.get("usage_contexts", []) if isinstance(payload, dict) else []
+
+    if not isinstance(functions_raw, list):
+        click.echo("Invalid functions JSON: expected top-level list or object with 'functions' list.", err=True)
+        raise SystemExit(1)
+
+    try:
+        functions = [FunctionInfo.model_validate(x) for x in functions_raw]
+        usage_contexts = [UsageContext.model_validate(x) for x in contexts_raw] if isinstance(contexts_raw, list) else []
+    except Exception as e:
+        click.echo(f"Invalid functions JSON schema: {e}", err=True)
+        raise SystemExit(1)
+
+    ctx = PipelineContext(
+        repo_path=None,
+        db_path=None,
+        language=language,
+        functions=functions,
+        usage_contexts=usage_contexts,
+        config={
+            "registry": registry,
+            "config_manager": config,
+            "generate_output": str(output_dir.resolve()) if output_dir else None,
+            "use_llm": not no_llm,
+            "validate": not no_validate,
+            "full_validate": full_validate,
+            "max_targets": max_targets,
+            "generate_subdirs": not no_subdirs,
+            "write_harnesses": True,
+        },
+    )
+
+    stage = registry.get_stage("generate")
+    result = stage.execute(ctx)
+    if not result.success:
+        click.echo(result.message or "Generate failed.", err=True)
+        raise SystemExit(1)
+
+    click.echo(result.message or "Generate succeeded.")
+    if result.data.get("fuzz_targets_dir"):
+        click.echo(f"Output dir: {result.data['fuzz_targets_dir']}")
+    if result.data.get("valid_count") is not None:
+        click.echo(f"Valid harnesses: {result.data['valid_count']}")
 
 
 if __name__ == "__main__":
