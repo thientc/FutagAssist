@@ -468,5 +468,146 @@ def compile(
         click.echo(f"Failed: {result.data['failed_count']}")
 
 
+@main.command()
+@click.option(
+    "--binaries",
+    "binaries_dir",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Directory containing compiled fuzz binaries (from compile stage).",
+)
+@click.option(
+    "--output",
+    "results_dir",
+    type=click.Path(path_type=Path),
+    help="Output directory for fuzz results (default: ./fuzz_results).",
+)
+@click.option("--engine", "fuzz_engine", default=None, help="Fuzzer engine to use (default: from config).")
+@click.option("--max-time", "max_total_time", type=int, default=60, help="Max total fuzzing time per binary in seconds (default: 60).")
+@click.option("--timeout", "fuzz_timeout", type=int, default=30, help="Timeout per test case in seconds (default: 30).")
+@click.option("--fork", type=int, default=1, help="Number of fork workers (default: 1).")
+@click.option("--rss-limit", "rss_limit_mb", type=int, default=2048, help="RSS memory limit in MB (default: 2048).")
+@click.option("--no-coverage", is_flag=True, help="Skip coverage collection.")
+def fuzz(
+    binaries_dir: Path,
+    results_dir: Path | None,
+    fuzz_engine: str | None,
+    max_total_time: int,
+    fuzz_timeout: int,
+    fork: int,
+    rss_limit_mb: int,
+    no_coverage: bool,
+) -> None:
+    """Run compiled fuzz targets through a fuzzer engine."""
+    config, registry = _load_env_and_plugins()
+
+    # Discover binaries
+    binaries_list = sorted(
+        f for f in binaries_dir.iterdir()
+        if f.is_file() and not f.suffix
+    )
+    if not binaries_list:
+        click.echo("No fuzz binaries found in directory.", err=True)
+        raise SystemExit(1)
+
+    ctx = PipelineContext(
+        repo_path=binaries_dir.parent,
+        binaries_dir=binaries_dir.resolve(),
+        config={
+            "registry": registry,
+            "config_manager": config,
+            "fuzz_engine": fuzz_engine,
+            "fuzz_results_dir": str(results_dir.resolve()) if results_dir else None,
+            "fuzz_max_total_time": max_total_time,
+            "fuzz_timeout": fuzz_timeout,
+            "fuzz_fork": fork,
+            "fuzz_rss_limit_mb": rss_limit_mb,
+            "fuzz_coverage": not no_coverage,
+        },
+    )
+
+    stage = registry.get_stage("fuzz")
+    result = stage.execute(ctx)
+    if not result.success:
+        click.echo(result.message or "Fuzzing failed.", err=True)
+        raise SystemExit(1)
+
+    click.echo(result.message or "Fuzzing complete.")
+    if result.data.get("results_dir"):
+        click.echo(f"Results: {result.data['results_dir']}")
+    if result.data.get("unique_crashes"):
+        click.echo(f"Unique crashes: {result.data['unique_crashes']}")
+
+
+@main.command()
+@click.option(
+    "--results",
+    "results_dir",
+    type=click.Path(path_type=Path, exists=True),
+    help="Directory containing fuzz results (from fuzz stage).",
+)
+@click.option(
+    "--output",
+    "report_output",
+    type=click.Path(path_type=Path),
+    help="Output directory for reports (default: ./reports).",
+)
+@click.option(
+    "--format",
+    "report_formats",
+    multiple=True,
+    help="Report format(s) to generate (e.g. json, sarif, html). Repeatable. Default: all registered.",
+)
+@click.option(
+    "--functions",
+    "functions_path",
+    type=click.Path(path_type=Path, exists=True),
+    help="Path to functions JSON file (from analyze stage) to include in reports.",
+)
+def report(
+    results_dir: Path | None,
+    report_output: Path | None,
+    report_formats: tuple[str, ...],
+    functions_path: Path | None,
+) -> None:
+    """Generate reports from fuzzing results."""
+    config, registry = _load_env_and_plugins()
+
+    functions: list[FunctionInfo] = []
+    if functions_path:
+        try:
+            payload = json.loads(functions_path.read_text(encoding="utf-8", errors="replace"))
+            raw = payload.get("functions") if isinstance(payload, dict) else payload
+            if isinstance(raw, list):
+                functions = [FunctionInfo.model_validate(x) for x in raw]
+        except Exception as e:
+            click.echo(f"Warning: could not load functions JSON: {e}", err=True)
+
+    ctx = PipelineContext(
+        repo_path=Path.cwd(),
+        results_dir=results_dir.resolve() if results_dir else None,
+        functions=functions,
+        config={
+            "registry": registry,
+            "config_manager": config,
+            "report_output": str(report_output.resolve()) if report_output else None,
+            "report_formats": list(report_formats) if report_formats else None,
+        },
+    )
+
+    stage = registry.get_stage("report")
+    result = stage.execute(ctx)
+    if not result.success:
+        click.echo(result.message or "Report generation failed.", err=True)
+        raise SystemExit(1)
+
+    click.echo(result.message or "Reports generated.")
+    if result.data.get("report_output"):
+        click.echo(f"Output: {result.data['report_output']}")
+    if result.data.get("written_files"):
+        for f in result.data["written_files"]:
+            click.echo(f"  {f}")
+
+
 if __name__ == "__main__":
     main()
