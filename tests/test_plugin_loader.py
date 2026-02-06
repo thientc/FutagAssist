@@ -73,3 +73,40 @@ def register(registry):
     loaded = loader.load_all()
     assert len(loaded) >= 1
     assert "openai" in reg.list_available()["llm_providers"]
+
+
+def test_plugin_loader_load_all_collects_errors(tmp_path: Path) -> None:
+    """load_all() logs and collects errors instead of silently swallowing them."""
+    # Create a plugin that raises during import
+    (tmp_path / "bad_plugin.py").write_text("raise ImportError('deliberate')\n")
+    # Create a good plugin
+    (tmp_path / "good_plugin.py").write_text('''
+def register(registry):
+    from tests.test_registry import _MockLLM
+    registry.register_llm("good", _MockLLM)
+''')
+    reg = ComponentRegistry()
+    loader = PluginLoader([tmp_path], reg)
+    loaded = loader.load_all()
+    # Good plugin loaded despite the bad one
+    assert "good" in reg.list_available()["llm_providers"]
+    # Errors collected
+    assert len(loader.load_errors) == 1
+    path, err = loader.load_errors[0]
+    assert "bad_plugin" in str(path)
+
+
+def test_plugin_loader_skips_private_modules(tmp_path: Path) -> None:
+    """Modules starting with _ are skipped during discovery."""
+    (tmp_path / "_private.py").write_text("x = 1\n")
+    (tmp_path / "public.py").write_text('''
+def register(registry):
+    from tests.test_registry import _MockLLM
+    registry.register_llm("public", _MockLLM)
+''')
+    reg = ComponentRegistry()
+    loader = PluginLoader([tmp_path], reg)
+    discovered = loader.discover_plugins()
+    names = [d.name for d in discovered]
+    assert "_private" not in names
+    assert "public" in names

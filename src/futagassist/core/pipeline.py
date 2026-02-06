@@ -38,9 +38,21 @@ class PipelineEngine:
         return self._registry
 
     def run(self, context: PipelineContext) -> PipelineResult:
-        """Run all non-skipped stages and return the final result."""
+        """Run all non-skipped stages and return the final result.
+
+        Stages are executed in the order specified by ``config.stages``.
+        No automatic dependency resolution is performed -- callers must
+        ensure ``config.stages`` respects each stage's ``depends_on``.
+        """
         for stage_name in self._config.stages:
             if stage_name in self._config.skip_stages:
+                context.stage_results.append(
+                    StageResult(
+                        stage_name=stage_name,
+                        success=True,
+                        message="skipped (in skip_stages)",
+                    )
+                )
                 continue
             try:
                 stage = self._registry.get_stage(stage_name)
@@ -57,6 +69,13 @@ class PipelineEngine:
                 continue
 
             if getattr(stage, "can_skip", None) and stage.can_skip(context):
+                context.stage_results.append(
+                    StageResult(
+                        stage_name=stage_name,
+                        success=True,
+                        message="skipped (can_skip=True)",
+                    )
+                )
                 continue
 
             try:

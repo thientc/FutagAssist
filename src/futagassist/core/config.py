@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+log = logging.getLogger(__name__)
 
 
 def _find_project_root(start: Path | None = None) -> Path:
@@ -25,7 +28,7 @@ class PipelineConfigModel(BaseModel):
     """Pipeline section of config."""
 
     stages: list[str] = Field(
-        default_factory=lambda: ["build", "analyze", "generate", "compile", "fuzz", "report"]
+        default_factory=lambda: ["build", "analyze", "generate", "fuzz_build", "compile", "fuzz", "report"]
     )
     skip_stages: list[str] = Field(default_factory=list)
     stop_on_failure: bool = True
@@ -80,9 +83,15 @@ class ConfigManager:
         """Load .env file into a dict (without modifying os.environ)."""
         try:
             from dotenv import dotenv_values
+        except ImportError:
+            log.debug("python-dotenv not installed; skipping .env loading")
+            self._env = {}
+            return self._env
+        try:
             self._env = dict(dotenv_values(self._env_path))
             return self._env
-        except Exception:
+        except (OSError, PermissionError) as e:
+            log.warning("Failed to read .env file %s: %s", self._env_path, e)
             self._env = {}
             return self._env
 
@@ -92,9 +101,17 @@ class ConfigManager:
             return {}
         try:
             import yaml
+        except ImportError:
+            log.warning("pyyaml not installed; skipping YAML config loading")
+            return {}
+        try:
             with open(self._config_path) as f:
                 return yaml.safe_load(f) or {}
-        except Exception:
+        except (OSError, PermissionError) as e:
+            log.warning("Failed to read config file %s: %s", self._config_path, e)
+            return {}
+        except yaml.YAMLError as e:
+            log.warning("Malformed YAML in %s: %s", self._config_path, e)
             return {}
 
     def load(self) -> AppConfig:
@@ -110,10 +127,16 @@ class ConfigManager:
             "reporters": yaml_data.get("reporters", ["json", "sarif"]),
             "codeql_home": yaml_data.get("codeql_home"),
         }
-        if env.get("LLM_PROVIDER"):
-            config_dict["llm_provider"] = env["LLM_PROVIDER"]
-        if env.get("CODEQL_HOME"):
-            config_dict["codeql_home"] = env["CODEQL_HOME"]
+        # Environment variables override YAML values
+        env_mapping = {
+            "LLM_PROVIDER": "llm_provider",
+            "FUZZER_ENGINE": "fuzzer_engine",
+            "LANGUAGE": "language",
+            "CODEQL_HOME": "codeql_home",
+        }
+        for env_key, config_key in env_mapping.items():
+            if env.get(env_key):
+                config_dict[config_key] = env[env_key]
 
         if "llm" in yaml_data and yaml_data["llm"]:
             config_dict["llm"] = LLMConfigModel(**yaml_data["llm"])
@@ -130,7 +153,8 @@ class ConfigManager:
         """Return loaded config; load if not yet loaded."""
         if self._config is None:
             self.load()
-        assert self._config is not None
+        if self._config is None:
+            raise RuntimeError("ConfigManager.load() failed to produce a config")
         return self._config
 
     @property

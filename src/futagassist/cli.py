@@ -222,6 +222,49 @@ def build(
     raise SystemExit(1)
 
 
+@main.command("fuzz-build")
+@click.option("--repo", "repo_path", required=True, type=click.Path(path_type=Path, exists=True), help="Repository or project path.")
+@click.option("--prefix", "fuzz_install_prefix", type=click.Path(path_type=Path), help="Install prefix for instrumented build (default: <repo>/install-fuzz).")
+@click.option("--configure-options", "fuzz_build_configure_options", default=None, help="Extra flags for the configure step (e.g. --without-ssl).")
+@click.option("--log-file", "fuzz_build_log_file", type=click.Path(path_type=Path), help="Write fuzz-build log to this file (default: <repo>/futagassist-fuzz-build.log).")
+@click.option("--verbose", "-v", "fuzz_build_verbose", is_flag=True, help="Verbose fuzz-build log.")
+def fuzz_build(
+    repo_path: Path,
+    fuzz_install_prefix: Path | None,
+    fuzz_build_configure_options: str | None,
+    fuzz_build_log_file: Path | None,
+    fuzz_build_verbose: bool,
+) -> None:
+    """Build library with debug + sanitizers (ASan/UBSan) and install to fuzz prefix."""
+    config, registry = _load_env_and_plugins()
+    ctx = PipelineContext(
+        repo_path=repo_path.resolve(),
+        config={
+            "registry": registry,
+            "config_manager": config,
+            "fuzz_install_prefix": str(fuzz_install_prefix.resolve()) if fuzz_install_prefix else None,
+            "fuzz_build_log_file": fuzz_build_log_file.resolve() if fuzz_build_log_file else None,
+            "fuzz_build_verbose": fuzz_build_verbose,
+            "fuzz_build_configure_options": fuzz_build_configure_options,
+        },
+    )
+    stage = registry.get_stage("fuzz_build")
+    result = stage.execute(ctx)
+    if result.success:
+        click.echo("Fuzz build succeeded.")
+        if result.data.get("fuzz_install_prefix"):
+            click.echo(f"Instrumented install: {result.data['fuzz_install_prefix']}")
+        if result.data.get("fuzz_build_log_file"):
+            click.echo(f"Log: {result.data['fuzz_build_log_file']}")
+        return
+    click.echo("Fuzz build failed.", err=True)
+    if result.message:
+        click.echo(result.message, err=True)
+    if result.data and result.data.get("fuzz_build_log_file"):
+        click.echo(f"Log: {result.data['fuzz_build_log_file']}", err=True)
+    raise SystemExit(1)
+
+
 @main.command()
 @click.option("--db", "db_path", required=True, type=click.Path(path_type=Path, exists=True), help="Path to CodeQL database (from build stage).")
 @click.option("--output", "output_path", type=click.Path(path_type=Path), help="Write function list to this JSON file.")
@@ -337,6 +380,92 @@ def generate(
         click.echo(f"Output dir: {result.data['fuzz_targets_dir']}")
     if result.data.get("valid_count") is not None:
         click.echo(f"Valid harnesses: {result.data['valid_count']}")
+
+
+@main.command()
+@click.option(
+    "--targets",
+    "targets_dir",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Directory containing generated harness sources (from generate stage).",
+)
+@click.option(
+    "--output",
+    "output_dir",
+    type=click.Path(path_type=Path),
+    help="Output directory for compiled binaries (default: ./fuzz_binaries).",
+)
+@click.option("--prefix", "fuzz_install_prefix", type=click.Path(path_type=Path), help="Instrumented library install prefix (from fuzz-build stage).")
+@click.option("--compiler", default="clang++", help="Compiler to use (default: clang++).")
+@click.option("--retry", "max_retries", type=int, default=3, help="Max LLM-assisted retries per harness (default: 3).")
+@click.option("--no-llm", is_flag=True, help="Disable LLM-assisted error fixing.")
+@click.option("--language", default="cpp", help="Language for compiler flags (default: cpp).")
+@click.option("--timeout", "compile_timeout", type=int, default=120, help="Compiler timeout in seconds (default: 120).")
+def compile(
+    targets_dir: Path,
+    output_dir: Path | None,
+    fuzz_install_prefix: Path | None,
+    compiler: str,
+    max_retries: int,
+    no_llm: bool,
+    language: str,
+    compile_timeout: int,
+) -> None:
+    """Compile fuzz harnesses into instrumented binaries."""
+    config, registry = _load_env_and_plugins()
+
+    # Discover harness source files in target dir
+    source_files = sorted(targets_dir.rglob("harness_*.cpp")) + sorted(targets_dir.rglob("fuzz_*.cpp"))
+    if not source_files:
+        # Fallback: any .cpp file
+        source_files = sorted(targets_dir.rglob("*.cpp"))
+    if not source_files:
+        click.echo("No harness source files found in target directory.", err=True)
+        raise SystemExit(1)
+
+    # Build GeneratedHarness objects from source files
+    from futagassist.core.schema import GeneratedHarness
+    harnesses = []
+    for sf in source_files:
+        code = sf.read_text(encoding="utf-8", errors="replace")
+        name = sf.stem.removeprefix("harness_").removeprefix("fuzz_")
+        harnesses.append(GeneratedHarness(
+            function_name=name,
+            file_path=str(sf),
+            source_code=code,
+            is_valid=True,
+        ))
+
+    ctx = PipelineContext(
+        repo_path=targets_dir.parent,
+        language=language,
+        generated_harnesses=harnesses,
+        fuzz_install_prefix=fuzz_install_prefix.resolve() if fuzz_install_prefix else None,
+        config={
+            "registry": registry,
+            "config_manager": config,
+            "compile_output": str(output_dir.resolve()) if output_dir else None,
+            "compile_compiler": compiler,
+            "compile_max_retries": max_retries,
+            "compile_use_llm": not no_llm,
+            "compile_timeout": compile_timeout,
+        },
+    )
+
+    stage = registry.get_stage("compile")
+    result = stage.execute(ctx)
+    if not result.success:
+        click.echo(result.message or "Compilation failed.", err=True)
+        raise SystemExit(1)
+
+    click.echo(result.message or "Compilation succeeded.")
+    if result.data.get("binaries_dir"):
+        click.echo(f"Binaries: {result.data['binaries_dir']}")
+    if result.data.get("compiled_count") is not None:
+        click.echo(f"Compiled: {result.data['compiled_count']}")
+    if result.data.get("failed_count"):
+        click.echo(f"Failed: {result.data['failed_count']}")
 
 
 if __name__ == "__main__":

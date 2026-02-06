@@ -171,3 +171,41 @@ def test_registry_list_available_after_register() -> None:
     assert "mock" in avail["llm_providers"]
     assert "mock" in avail["fuzzer_engines"]
     assert "mock" in avail["stages"]
+
+
+def test_registry_duplicate_registration_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """Registering the same name twice logs a warning but succeeds."""
+    import logging
+
+    reg = ComponentRegistry()
+    with caplog.at_level(logging.WARNING, logger="futagassist.core.registry"):
+        reg.register_llm("dup", _MockLLM)
+        reg.register_llm("dup", _MockLLM)
+    assert any("Overwriting LLM provider" in r.message for r in caplog.records)
+    # Second registration still works
+    assert reg.get_llm("dup").name == "mock_llm"
+
+
+def test_registry_options_merging() -> None:
+    """kwargs passed to get_llm override stored options."""
+
+    class _LLMWithKey:
+        name = "keyed"
+
+        def __init__(self, api_key: str = ""):
+            self.api_key = api_key
+
+        def complete(self, prompt: str, **kwargs: object) -> str:
+            return "ok"
+
+        def check_health(self) -> bool:
+            return True
+
+    reg = ComponentRegistry()
+    reg.register_llm("keyed", _LLMWithKey, api_key="stored")
+    # Stored option used
+    provider = reg.get_llm("keyed")
+    assert provider.api_key == "stored"
+    # Kwargs override stored
+    provider2 = reg.get_llm("keyed", api_key="override")
+    assert provider2.api_key == "override"

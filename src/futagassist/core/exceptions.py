@@ -9,6 +9,12 @@ class FutagAssistError(Exception):
     pass
 
 
+class ConfigError(FutagAssistError):
+    """Raised when configuration loading or validation fails."""
+
+    pass
+
+
 class RegistryError(FutagAssistError):
     """Raised when a component is not found or registration fails."""
 
@@ -23,5 +29,17 @@ class PluginLoadError(FutagAssistError):
 
 class PipelineError(FutagAssistError):
     """Raised when a pipeline stage fails."""
+
+    pass
+
+
+class BuildError(FutagAssistError):
+    """Raised when a build operation fails."""
+
+    pass
+
+
+class AnalysisError(FutagAssistError):
+    """Raised when CodeQL analysis fails."""
 
     pass

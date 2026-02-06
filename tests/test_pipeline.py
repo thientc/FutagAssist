@@ -39,6 +39,17 @@ class _FailStage(PipelineStage):
         return False
 
 
+class _SkippableStage(PipelineStage):
+    name = "skippable_stage"
+    depends_on: list[str] = []
+
+    def execute(self, context: PipelineContext) -> StageResult:
+        return StageResult(stage_name=self.name, success=True, message="ran")
+
+    def can_skip(self, context: PipelineContext) -> bool:
+        return True
+
+
 class _RaiseStage(PipelineStage):
     name = "raise_stage"
     depends_on: list[str] = []
@@ -72,7 +83,10 @@ def test_pipeline_skip_stages() -> None:
     context = PipelineContext()
     result = engine.run(context)
     assert result.success is True
-    assert len(result.stage_results) == 0
+    # Skipped stages now produce a traceability record
+    assert len(result.stage_results) == 1
+    assert result.stage_results[0].success is True
+    assert "skipped" in result.stage_results[0].message
 
 
 def test_pipeline_run_one_stage() -> None:
@@ -145,3 +159,34 @@ def test_pipeline_finalize_reflects_success() -> None:
     result = engine.run(context)
     assert result.success is False
     assert result.stage_results[0].success is False
+
+
+def test_pipeline_can_skip_records_skipped_result() -> None:
+    """When can_skip() returns True, a traceability record is added."""
+    reg = ComponentRegistry()
+    reg.register_stage("skippable", _SkippableStage)
+    config = PipelineConfig(stages=["skippable"], skip_stages=[], stop_on_failure=True)
+    engine = PipelineEngine(reg, config)
+    context = PipelineContext()
+    result = engine.run(context)
+    assert result.success is True
+    assert len(result.stage_results) == 1
+    assert result.stage_results[0].stage_name == "skippable"
+    assert "can_skip" in result.stage_results[0].message
+
+
+def test_pipeline_can_skip_does_not_execute() -> None:
+    """When can_skip() returns True, execute() is not called."""
+    reg = ComponentRegistry()
+    reg.register_stage("skippable", _SkippableStage)
+    reg.register_stage("success", _SuccessStage)
+    config = PipelineConfig(stages=["skippable", "success"], skip_stages=[], stop_on_failure=True)
+    engine = PipelineEngine(reg, config)
+    context = PipelineContext()
+    result = engine.run(context)
+    assert result.success is True
+    assert len(result.stage_results) == 2
+    # Skippable was skipped, success ran
+    assert "can_skip" in result.stage_results[0].message
+    assert result.stage_results[1].stage_name == "success_stage"
+    assert result.stage_results[1].data.get("db_path") is not None

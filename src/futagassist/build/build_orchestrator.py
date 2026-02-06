@@ -272,14 +272,16 @@ class BuildOrchestrator:
                     return False, None, msg, fix_cmd if fix_cmd else None
 
                 if fix_cmd:
-                    log.info(
-                        "Suggested fix (run manually if you agree): %s",
-                        fix_cmd,
-                    )
-                    msg = self._format_failure_message(
-                        error_output, full_build_cmd, fix_cmd, llm_error=llm_error
-                    )
-                    return False, None, msg, fix_cmd
+                    log.info("Attempting auto-fix: %s", fix_cmd)
+                    if self._run_fix_command(repo_path, fix_cmd):
+                        log.info("Fix succeeded; retrying build (attempt %s/%s)", attempt + 2, self._max_retries)
+                        continue
+                    else:
+                        log.warning("Fix command failed; returning suggestion for manual retry")
+                        msg = self._format_failure_message(
+                            error_output, full_build_cmd, fix_cmd, llm_error=llm_error
+                        )
+                        return False, None, msg, fix_cmd
                 log.warning("No fix suggested; build failed")
                 msg = self._format_failure_message(
                     error_output, full_build_cmd, fix_cmd, llm_error=llm_error

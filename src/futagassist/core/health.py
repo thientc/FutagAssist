@@ -175,13 +175,19 @@ class HealthChecker:
                 suggestion="Fuzzer engines are loaded from plugins/; run from project root or add a fuzzer plugin.",
             )
         if engine_name == "libfuzzer":
-            ok, out = _run_cmd(["clang", "--version"])
-            if ok:
-                return HealthCheckResult(name="fuzzer", ok=True, message="clang found")
+            ok_c, out_c = _run_cmd(["clang", "--version"])
+            ok_cxx, out_cxx = _run_cmd(["clang++", "--version"])
+            if ok_c and ok_cxx:
+                return HealthCheckResult(name="fuzzer", ok=True, message="clang and clang++ found")
+            missing = []
+            if not ok_c:
+                missing.append("clang")
+            if not ok_cxx:
+                missing.append("clang++")
             return HealthCheckResult(
                 name="fuzzer",
                 ok=False,
-                message="clang not found. libFuzzer requires clang. Install LLVM/clang.",
+                message=f"{', '.join(missing)} not found. libFuzzer requires clang/clang++.",
                 suggestion="Install LLVM/clang (e.g. apt install clang, or download from llvm.org).",
             )
         return HealthCheckResult(name="fuzzer", ok=True, message=f"{engine_name} registered")

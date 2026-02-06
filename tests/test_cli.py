@@ -264,6 +264,37 @@ def test_cli_build_interactive_accept_fix_retries(runner: CliRunner, tmp_path: P
     mock_run.assert_called_once()
 
 
+def test_cli_fuzz_build_requires_repo(runner: CliRunner) -> None:
+    """fuzz-build command requires --repo."""
+    result = runner.invoke(main, ["fuzz-build"], catch_exceptions=False)
+    assert result.exit_code != 0
+
+
+def test_cli_fuzz_build_help(runner: CliRunner) -> None:
+    """fuzz-build --help shows options."""
+    result = runner.invoke(main, ["fuzz-build", "--help"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "fuzz-build" in result.output or "fuzz" in result.output
+    assert "--repo" in result.output
+    assert "sanitizer" in result.output.lower() or "install" in result.output.lower()
+
+
+def test_cli_fuzz_build_success_with_mock(runner: CliRunner, tmp_path: Path) -> None:
+    """fuzz-build with --repo runs FuzzBuildStage; success prints fuzz_install_prefix."""
+    (tmp_path / "README").write_text("make")
+    with patch("futagassist.stages.fuzz_build_stage.subprocess.run") as m:
+        m.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(
+                main,
+                ["fuzz-build", "--repo", str(tmp_path)],
+                catch_exceptions=False,
+            )
+    assert result.exit_code == 0
+    assert "Fuzz build succeeded" in result.output
+    assert "install-fuzz" in result.output or "Instrumented install" in result.output
+
+
 def test_cli_analyze_requires_db(runner: CliRunner) -> None:
     """analyze command requires --db."""
     result = runner.invoke(main, ["analyze"], catch_exceptions=False)

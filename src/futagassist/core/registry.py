@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, TypeVar
 
 from futagassist.core.exceptions import RegistryError
@@ -14,6 +15,8 @@ from futagassist.protocols import (
 )
 
 T = TypeVar("T")
+
+log = logging.getLogger(__name__)
 
 
 class ComponentRegistry:
@@ -30,26 +33,36 @@ class ComponentRegistry:
 
     def register_llm(self, name: str, cls: type[LLMProvider], **options: Any) -> None:
         """Register an LLM provider class."""
+        if name in self._llm_providers:
+            log.warning("Overwriting LLM provider registration: %s", name)
         self._llm_providers[name] = cls
         if options:
             self._llm_options[name] = options
 
     def register_fuzzer(self, name: str, cls: type[FuzzerEngine], **options: Any) -> None:
         """Register a fuzzer engine class."""
+        if name in self._fuzzer_engines:
+            log.warning("Overwriting fuzzer engine registration: %s", name)
         self._fuzzer_engines[name] = cls
         if options:
             self._fuzzer_options[name] = options
 
     def register_language(self, lang: str, cls: type[LanguageAnalyzer]) -> None:
         """Register a language analyzer class."""
+        if lang in self._language_analyzers:
+            log.warning("Overwriting language analyzer registration: %s", lang)
         self._language_analyzers[lang] = cls
 
     def register_reporter(self, fmt: str, cls: type[Reporter]) -> None:
         """Register a reporter class."""
+        if fmt in self._reporters:
+            log.warning("Overwriting reporter registration: %s", fmt)
         self._reporters[fmt] = cls
 
     def register_stage(self, name: str, cls: type[PipelineStage]) -> None:
         """Register a pipeline stage class."""
+        if name in self._stages:
+            log.warning("Overwriting stage registration: %s", name)
         self._stages[name] = cls
 
     def get_llm(self, name: str, **kwargs: Any) -> LLMProvider:

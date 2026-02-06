@@ -64,3 +64,36 @@ def test_config_manager_project_root(tmp_path: Path) -> None:
     (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
     config_mgr = ConfigManager(project_root=root)
     assert config_mgr.project_root == root
+
+
+def test_config_manager_malformed_yaml(tmp_path: Path) -> None:
+    """Malformed YAML logs warning and returns defaults."""
+    yaml_file = tmp_path / "config.yaml"
+    yaml_file.write_text("llm_provider: [unterminated\n")
+    config_mgr = ConfigManager(project_root=tmp_path)
+    config_mgr._config_path = yaml_file
+    config_mgr._env_path = tmp_path / ".env"
+    config = config_mgr.load()
+    # Falls back to defaults
+    assert config.llm_provider == "openai"
+
+
+def test_config_manager_env_overrides_fuzzer_and_language(tmp_path: Path) -> None:
+    """FUZZER_ENGINE and LANGUAGE env vars override YAML."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("FUZZER_ENGINE=aflpp\nLANGUAGE=python\n")
+    config_mgr = ConfigManager(project_root=tmp_path)
+    config_mgr._config_path = tmp_path / "nonexistent.yaml"
+    config_mgr._env_path = env_file
+    config = config_mgr.load()
+    assert config.fuzzer_engine == "aflpp"
+    assert config.language == "python"
+
+
+def test_config_manager_fuzz_build_in_default_stages(tmp_path: Path) -> None:
+    """Default pipeline stages include fuzz_build."""
+    config_mgr = ConfigManager(project_root=tmp_path)
+    config_mgr._config_path = tmp_path / "nonexistent.yaml"
+    config_mgr._env_path = tmp_path / ".env"
+    config = config_mgr.load()
+    assert "fuzz_build" in config.pipeline.stages

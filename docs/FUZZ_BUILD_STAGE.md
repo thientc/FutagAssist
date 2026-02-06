@@ -1,6 +1,6 @@
-# Fuzz Build Stage (Future Work)
+# Fuzz Build Stage
 
-This document describes the planned **Fuzz Build** (instrumentation) stage for FutagAssist. It is intended for future implementation when the compile and fuzz stages are added.
+This document describes the **Fuzz Build** (instrumentation) stage for FutagAssist. It is implemented in `stages/fuzz_build_stage.py` and exposed via `futagassist fuzz-build`.
 
 ## Purpose
 

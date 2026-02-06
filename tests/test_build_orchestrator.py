@@ -274,6 +274,77 @@ def test_build_orchestrator_returns_suggested_fix_on_failure_with_fix(tmp_path: 
     assert "Suggested fix" in message or "libtoolize" in message
 
 
+def test_build_orchestrator_retry_with_fix_command(tmp_path: Path) -> None:
+    """When build fails and LLM suggests a fix, the orchestrator runs the fix and retries."""
+    (tmp_path / "README").write_text("make")
+
+    class MockLLM:
+        name = "mock"
+        def complete(self, prompt: str, **kwargs):
+            return "apt install libfoo-dev"
+
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    orch = BuildOrchestrator(
+        readme_analyzer=analyzer,
+        llm_provider=MockLLM(),
+        codeql_bin="codeql",
+        max_retries=3,
+    )
+
+    call_count = 0
+
+    def fake_run(args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        # Distinguish CodeQL calls (list args) from fix commands (string with shell=True)
+        if isinstance(args, list) and any("codeql" in str(a) for a in args):
+            if call_count <= 2:
+                # First CodeQL attempt fails
+                return type("R", (), {"returncode": 1, "stdout": "", "stderr": "missing libfoo"})()
+            # Second CodeQL attempt (after fix) succeeds
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        # Fix command succeeds
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        success, db_path, message, suggested_fix = orch.build(tmp_path)
+
+    assert success is True
+    assert db_path is not None
+    # At least 3 subprocess calls: first codeql (fail), fix cmd, second codeql (success)
+    assert call_count >= 3
+
+
+def test_build_orchestrator_retry_fix_fails_returns_suggestion(tmp_path: Path) -> None:
+    """When the fix command itself fails, the orchestrator returns the suggestion for manual retry."""
+    (tmp_path / "README").write_text("make")
+
+    class MockLLM:
+        name = "mock"
+        def complete(self, prompt: str, **kwargs):
+            return "apt install libfoo-dev"
+
+    analyzer = ReadmeAnalyzer(llm_provider=None)
+    orch = BuildOrchestrator(
+        readme_analyzer=analyzer,
+        llm_provider=MockLLM(),
+        codeql_bin="codeql",
+        max_retries=2,
+    )
+
+    def fake_run(args, **kwargs):
+        if isinstance(args, list) and any("codeql" in str(a) for a in args):
+            return type("R", (), {"returncode": 1, "stdout": "", "stderr": "error"})()
+        # Fix command fails
+        return type("R", (), {"returncode": 127, "stdout": "", "stderr": "apt: not found"})()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        success, db_path, message, suggested_fix = orch.build(tmp_path)
+
+    assert success is False
+    assert suggested_fix == "apt install libfoo-dev"
+
+
 def test_build_orchestrator_configure_options_in_script(tmp_path: Path) -> None:
     """When configure_options is set, the build script contains ./configure <options>."""
     (tmp_path / "configure.ac").write_text("AC_INIT")

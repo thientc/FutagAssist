@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 
 from futagassist.core.exceptions import PluginLoadError
 from futagassist.core.registry import ComponentRegistry
 from futagassist.core.schema import PluginInfo
+
+log = logging.getLogger(__name__)
 
 
 def _find_plugin_modules(plugin_dir: Path) -> list[Path]:
@@ -88,12 +91,25 @@ class PluginLoader:
         )
 
     def load_all(self) -> list[PluginInfo]:
-        """Discover and load all plugins; return list of loaded plugin info."""
+        """Discover and load all plugins; return list of loaded plugin info.
+
+        Plugins that fail to load are logged as warnings and collected in
+        ``self.load_errors`` for later inspection.
+        """
         self._loaded = []
+        self.load_errors: list[tuple[Path, PluginLoadError]] = []
         for plugin_dir in self._plugin_dirs:
             for mod_path in _find_plugin_modules(plugin_dir):
                 try:
                     self.load_plugin(mod_path)
-                except PluginLoadError:
+                except PluginLoadError as e:
+                    log.warning("Failed to load plugin %s: %s", mod_path, e)
+                    self.load_errors.append((mod_path, e))
                     continue
+        if self.load_errors:
+            log.warning(
+                "%d plugin(s) failed to load: %s",
+                len(self.load_errors),
+                ", ".join(str(p) for p, _ in self.load_errors),
+            )
         return list(self._loaded)

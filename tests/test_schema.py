@@ -6,6 +6,7 @@ from pathlib import Path
 
 from futagassist.core.schema import (
     FunctionInfo,
+    GeneratedHarness,
     PipelineContext,
     PipelineResult,
     StageResult,
@@ -75,3 +76,33 @@ def test_usage_context_model() -> None:
     assert u.name == "init_use_cleanup"
     assert u.calls == ["init", "use", "cleanup"]
     assert u.source_line == 42
+
+
+def test_generated_harness_validation_errors_force_is_valid_false() -> None:
+    """When validation_errors is non-empty, is_valid must be False."""
+    h = GeneratedHarness(
+        function_name="foo",
+        validation_errors=["missing include"],
+        is_valid=True,  # explicitly set True
+    )
+    assert h.is_valid is False
+
+
+def test_generated_harness_no_errors_keeps_is_valid_true() -> None:
+    """When validation_errors is empty, is_valid stays True."""
+    h = GeneratedHarness(function_name="foo")
+    assert h.is_valid is True
+    assert h.validation_errors == []
+
+
+def test_pipeline_context_update_fuzz_install_prefix() -> None:
+    """update() merges fuzz_install_prefix from stage result data."""
+    ctx = PipelineContext()
+    ctx.update(
+        StageResult(
+            stage_name="fuzz_build",
+            success=True,
+            data={"fuzz_install_prefix": "/opt/install-fuzz"},
+        )
+    )
+    assert ctx.fuzz_install_prefix == "/opt/install-fuzz"

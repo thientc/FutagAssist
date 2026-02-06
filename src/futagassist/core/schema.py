@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class FunctionInfo(BaseModel):
@@ -74,6 +74,13 @@ class GeneratedHarness(BaseModel):
     # Category for output subdir: api, usage_contexts, other
     category: str = ""
 
+    @model_validator(mode="after")
+    def _sync_is_valid(self) -> "GeneratedHarness":
+        """Ensure is_valid is False when validation_errors is non-empty."""
+        if self.validation_errors:
+            self.is_valid = False
+        return self
+
 
 class FuzzResult(BaseModel):
     """Result of a fuzzing run."""
@@ -119,6 +126,7 @@ class PipelineContext(BaseModel):
     fuzz_targets_dir: Path | None = None
     binaries_dir: Path | None = None
     results_dir: Path | None = None
+    fuzz_install_prefix: Path | None = None
     fuzz_results: list[FuzzResult] = Field(default_factory=list)
     stage_results: list[StageResult] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
@@ -139,6 +147,8 @@ class PipelineContext(BaseModel):
                 self.fuzz_targets_dir = result.data["fuzz_targets_dir"]
             if "binaries_dir" in result.data:
                 self.binaries_dir = result.data["binaries_dir"]
+            if "fuzz_install_prefix" in result.data:
+                self.fuzz_install_prefix = result.data["fuzz_install_prefix"]
             if "fuzz_results" in result.data:
                 self.fuzz_results = result.data["fuzz_results"]
 
@@ -153,6 +163,7 @@ class PipelineContext(BaseModel):
             generated_harnesses=self.generated_harnesses,
             fuzz_targets_dir=self.fuzz_targets_dir,
             binaries_dir=self.binaries_dir,
+            fuzz_install_prefix=self.fuzz_install_prefix,
             fuzz_results=self.fuzz_results,
         )
 
@@ -170,4 +181,5 @@ class PipelineResult(BaseModel):
     generated_harnesses: list[GeneratedHarness] = Field(default_factory=list)
     fuzz_targets_dir: Path | None = None
     binaries_dir: Path | None = None
+    fuzz_install_prefix: Path | None = None
     fuzz_results: list[FuzzResult] = Field(default_factory=list)
