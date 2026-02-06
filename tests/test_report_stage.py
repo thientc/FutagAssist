@@ -205,7 +205,7 @@ class TestReportStageExecution:
         assert data["lines_total"] == 100
 
     def test_report_all_data(self, tmp_path: Path) -> None:
-        """Functions + crashes + coverage produces three files."""
+        """Functions + crashes + coverage produces three files per format."""
         functions = [FunctionInfo(name="f", signature="void f()")]
         fuzz_results = [
             FuzzResult(
@@ -226,7 +226,10 @@ class TestReportStageExecution:
         result = stage.execute(ctx)
 
         assert result.success is True
-        assert len(result.data["written_files"]) == 3
+        # 3 data types (functions, crashes, coverage) x N registered formats
+        num_formats = len(result.data["report_formats"])
+        assert len(result.data["written_files"]) == 3 * num_formats
+        assert num_formats >= 3  # json, sarif, html
 
     def test_report_no_data(self, tmp_path: Path) -> None:
         """With no functions, crashes, or coverage, stage succeeds with message."""
