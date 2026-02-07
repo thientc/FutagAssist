@@ -436,34 +436,33 @@ Delegates to `Reporter` plugins:
 
 ---
 
-## Future Work: Fuzz Build (Instrumentation) Stage
+## Full Pipeline Flow
 
-When implementing the compile and fuzz stages, add a dedicated **Fuzz Build** (instrumentation) stage so the library is built with debug flags and sanitizers for fuzzing and debugging. The current build stage does not install; it only produces a CodeQL database. The planned Fuzz Build stage will build the library with `-g` and sanitizers (AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer) and install to a fuzz-specific prefix (e.g. `<repo>/install-fuzz`). The compile stage will then link fuzz targets against this instrumented install.
-
-- **Placement:** After `generate`, before `compile`. Depends on: `build`.
-- **Responsibility:** Rebuild library with injected `CFLAGS`/`CXXFLAGS`/`LDFLAGS`; install to `fuzz_install_prefix`.
-- **Context:** Publish `context.fuzz_install_prefix`; compile stage uses it when building fuzz targets.
-- **Optional:** Stage is skippable (`--skip fuzz_build`); compile stage falls back to normal `install_prefix` when skipped.
-
-See [FUZZ_BUILD_STAGE.md](FUZZ_BUILD_STAGE.md) for full specification and implementation notes.
+All stages are implemented and can be run individually or together via `futagassist run`:
 
 ```mermaid
 flowchart LR
-    subgraph existing [Current]
-        Build[BuildStage]
-        Analyze[AnalyzeStage]
-        Generate[GenerateStage]
-    end
-    subgraph planned [Planned]
-        FuzzBuild[FuzzBuildStage]
-    end
-    subgraph later [Later stages]
-        Compile[CompileStage]
-        Fuzz[FuzzStage]
-    end
-    Build --> Analyze --> Generate --> FuzzBuild --> Compile --> Fuzz
+    Build[BuildStage] --> Analyze[AnalyzeStage] --> Generate[GenerateStage]
+    Generate --> FuzzBuild[FuzzBuildStage] --> Compile[CompileStage]
+    Compile --> Fuzz[FuzzStage] --> Report[ReportStage]
     FuzzBuild -.->|fuzz_install_prefix| Compile
+    Generate -.->|harnesses| Compile
+    Fuzz -.->|crashes, coverage| Report
+    Analyze -.->|functions| Report
 ```
+
+| Stage | CLI | Description |
+|-------|-----|-------------|
+| `build` | `futagassist build` | Create CodeQL database from repo |
+| `analyze` | `futagassist analyze` | Extract functions via CodeQL queries |
+| `generate` | `futagassist generate` | Generate fuzz harnesses (template + LLM) |
+| `fuzz_build` | `futagassist fuzz-build` | Build library with debug + sanitizers |
+| `compile` | `futagassist compile` | Compile harnesses into instrumented binaries |
+| `fuzz` | `futagassist fuzz` | Run fuzzer on binaries, collect crashes |
+| `report` | `futagassist report` | Generate reports (JSON, SARIF, HTML) |
+| *all* | `futagassist run` | Run full pipeline with progress reporting |
+
+See per-stage docs: [FUZZ_BUILD_STAGE.md](FUZZ_BUILD_STAGE.md), [COMPILE_STAGE.md](COMPILE_STAGE.md), [FUZZ_STAGE.md](FUZZ_STAGE.md), [REPORT_STAGE.md](REPORT_STAGE.md).
 
 ---
 
@@ -568,107 +567,57 @@ Required (based on selected plugins):
 
 ```bash
 # Check environment and registered components
-futagassist check [--verbose]
+futagassist check [--verbose] [--skip-llm] [--skip-fuzzer] [--skip-plugins]
 
 # List available plugins
 futagassist plugins list
 
 # Run full pipeline
-futagassist run --repo <url|path> [options]
-
-# Run with stage control
-futagassist run --repo <url> --skip build --skip compile
-futagassist run --repo <url> --only analyze,generate
-
-# Override component selection
-futagassist run --repo <url> --llm ollama --fuzzer aflpp --language python
+futagassist run --repo <path> [--language cpp] [--stages s1,s2,...] [--skip s1,...] [--no-llm] [-v]
 
 # Run individual stages
-futagassist build --repo <url|path> [--language cpp] [--output <db-path>]
-futagassist analyze --db <path> [--output <json>]
-futagassist generate --functions <json> [--output <dir>]
-futagassist compile --targets <dir> [--output <dir>] [--retry <n>]
-futagassist fuzz --binaries <dir> [--timeout 300] [--fork 1]
-futagassist report --results <dir> [--format json,sarif,html]
-
-# Configuration
-futagassist config show
-futagassist config set llm_provider ollama
+futagassist build --repo <path> [--language cpp] [--output <db-path>] [--overwrite] [--build-script <script>] [-v]
+futagassist fuzz-build --repo <path> [--prefix <install-dir>] [--configure-options "..."] [-v]
+futagassist analyze --db <path> [--output <json>] [--language cpp]
+futagassist generate --functions <json> [--output <dir>] [--max-targets N] [--no-llm] [--no-validate] [--full-validate]
+futagassist compile --targets <dir> [--output <dir>] [--prefix <install-dir>] [--compiler clang++] [--retry N] [--no-llm]
+futagassist fuzz --binaries <dir> [--output <dir>] [--engine libfuzzer] [--max-time 60] [--timeout 30] [--fork 1]
+futagassist report [--results <dir>] [--output <dir>] [--format json] [--format html] [--functions <json>]
 ```
 
 ---
 
 ## Implementation Phases
 
-### Phase 0: Framework Foundation
+### Phase 0–4: Framework & Core Stages ✅
 
-- Protocol definitions in `protocols/`
-- `ComponentRegistry` with registration methods
-- `PluginLoader` with discovery from `plugins/`
-- `PipelineEngine` with stage skip/include support
-- Unit tests for framework core
+Protocols, `ComponentRegistry`, `PluginLoader`, `PipelineEngine`, `ConfigManager`, health checks, exception hierarchy, Pydantic schemas, CLI skeleton, `BuildStage`, `AnalyzeStage`, `GenerateStage`.
 
-### Phase 1: Core Layer
+### Phase 5: Fuzz Build Stage ✅
 
-- `ConfigManager` with YAML and .env loading
-- Health check system (extensible per component)
-- Base exception hierarchy
-- Pydantic schemas for data models
-- CLI skeleton with `check` and `plugins` commands
+`FuzzBuildStage` — builds library with debug + sanitizers (ASan/UBSan) and installs to a fuzz prefix.
 
-### Phase 2: Build Pipeline Stage
+### Phase 6: Compile Stage ✅
 
-- `BuildStage` implementation
-- README analyzer using LLM provider
-- CodeQL database creation wrapper
-- LLM-assisted error recovery loop
-- Tests with sample projects
+`CompileStage` — compiles fuzz harnesses with sanitizer flags, LLM-assisted error fixing, and retry logic.
 
-### Phase 3: Analysis Pipeline Stage
+### Phase 7: Fuzz & Report Stages ✅
 
-- `AnalyzeStage` implementation
-- CodeQL runner utility
-- Function extraction delegated to `LanguageAnalyzer`
-- Context builder for harness generation
-- JSON export via `Reporter`
+`FuzzStage` — runs fuzzer on compiled binaries, parses crashes, collects coverage. `ReportStage` — generates reports in JSON, SARIF, HTML via registered `Reporter` plugins.
 
-### Phase 4: Generation Pipeline Stage
-
-- `GenerateStage` implementation
-- Template-based harness scaffolding
-- LLM-based fuzz target generation
-- Syntax validation
-- Support for language-specific templates
-
-### Phase 5: Compilation Pipeline Stage
-
-- `CompileStage` implementation
-- Compiler flags from `LanguageAnalyzer`
-- LLM-assisted compilation error fixing
-- Retry logic with exponential backoff
-
-### Phase 6: Fuzzing Pipeline Stage
-
-- `FuzzStage` implementation
-- `FuzzerEngine` protocol implementation for libFuzzer (based on Futag)
-- Crash log parsing and deduplication
-- Coverage collection and reporting
-- `ReportStage` with multiple output formats
-
-### Phase 7: Built-in Plugins
+### Phase 8: Built-in Plugins ✅
 
 - **LLM Providers**: OpenAI, Ollama, Anthropic
-- **Fuzzer Engines**: libFuzzer, AFL++ (basic)
-- **Language Analyzers**: C/C++ (full), Python (basic)
-- **Reporters**: JSON, SARIF, SVRES, HTML
+- **Fuzzer Engines**: libFuzzer, AFL++
+- **Language Analyzers**: C/C++ (full)
+- **Reporters**: JSON, SARIF, HTML
 
-### Phase 8: Integration and Polish
+### Phase 9: Integration and Polish ✅
 
-- Full pipeline command (`futagassist run`)
-- Progress reporting with `rich`
-- Documentation: architecture, plugins guide, configuration
-- Example projects and tutorials
-- CI/CD setup
+- Full pipeline command (`futagassist run`) with stage-by-stage progress reporting
+- Configuration: `config/default.yaml`, `.env` support, environment variable overrides
+- Documentation: [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [QUICKSTART.md](QUICKSTART.md), [PLUGINS.md](PLUGINS.md)
+- Per-stage docs: [BUILD_WITH_CODEQL.md](BUILD_WITH_CODEQL.md), [ANALYZE_STAGE.md](ANALYZE_STAGE.md), [GENERATE_STAGE.md](GENERATE_STAGE.md), [FUZZ_BUILD_STAGE.md](FUZZ_BUILD_STAGE.md), [COMPILE_STAGE.md](COMPILE_STAGE.md), [FUZZ_STAGE.md](FUZZ_STAGE.md), [REPORT_STAGE.md](REPORT_STAGE.md)
 
 ---
 

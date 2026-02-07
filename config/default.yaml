@@ -1,31 +1,46 @@
-# FutagAssist default configuration
-# Override in this file or via environment variables (.env)
+# FutagAssist Configuration
+# Copy to your project root as futagassist.yaml or place in config/default.yaml
 
+# LLM provider: openai, ollama, anthropic
 llm_provider: openai
+
+# Fuzzer engine: libfuzzer, aflpp
 fuzzer_engine: libfuzzer
+
+# Target language: cpp (more planned)
 language: cpp
+
+# Reporter formats to use
 reporters:
   - json
   - sarif
+  - html
 
+# CodeQL home (path to CodeQL bundle root, or null for PATH lookup)
+# codeql_home: /opt/codeql
+
+# LLM settings
 llm:
-  model: gpt-5.1
-  max_retries: 5
-  temperature: 0.5
+  model: gpt-4
+  max_retries: 3
+  temperature: 0.2
 
+# Fuzzer settings
 fuzzer:
-  timeout: 10
-  max_total_time: 300
-  fork: 1
-  rss_limit_mb: 2048
+  timeout: 10          # per-testcase timeout (seconds)
+  max_total_time: 300  # total fuzzing time per binary (seconds)
+  fork: 1              # fork worker count
+  rss_limit_mb: 2048   # RSS memory limit (MB)
 
+# Pipeline stages and ordering
 pipeline:
   stages:
     - build
     - analyze
     - generate
+    - fuzz_build
     - compile
     - fuzz
     - report
-  skip_stages: []
-  stop_on_failure: true
+  skip_stages: []       # e.g. ["fuzz_build"] to skip instrumentation
+  stop_on_failure: true  # stop pipeline on first stage failure

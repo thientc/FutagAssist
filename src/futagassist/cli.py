@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -14,7 +16,7 @@ from futagassist.core.config import ConfigManager
 from futagassist.core.health import HealthChecker, HealthCheckResult
 from futagassist.core.plugin_loader import PluginLoader
 from futagassist.core.registry import ComponentRegistry
-from futagassist.core.schema import FunctionInfo, PipelineContext, UsageContext
+from futagassist.core.schema import FunctionInfo, PipelineContext, PipelineResult, StageResult, UsageContext
 from futagassist.reporters import register_builtin_reporters
 from futagassist.stages import register_builtin_stages
 
@@ -607,6 +609,229 @@ def report(
     if result.data.get("written_files"):
         for f in result.data["written_files"]:
             click.echo(f"  {f}")
+
+
+def _format_duration(seconds: float) -> str:
+    """Format seconds into human-readable duration."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds) // 60
+    secs = seconds - minutes * 60
+    return f"{minutes}m {secs:.0f}s"
+
+
+def _print_stage_header(stage_name: str, index: int, total: int) -> None:
+    """Print a stage progress header."""
+    click.echo(f"\n{'─' * 60}")
+    click.echo(f"  [{index}/{total}] Stage: {stage_name}")
+    click.echo(f"{'─' * 60}")
+
+
+def _print_stage_result(result: StageResult, elapsed: float) -> None:
+    """Print a stage result summary."""
+    icon = "✓" if result.success else "✗"
+    status = "OK" if result.success else "FAILED"
+    msg = f"  {icon} {result.stage_name}: {status} ({_format_duration(elapsed)})"
+    if result.message:
+        msg += f" — {result.message}"
+    if result.success:
+        click.echo(msg)
+    else:
+        click.echo(msg, err=True)
+
+
+def _print_pipeline_summary(pipeline_result: PipelineResult, total_elapsed: float) -> None:
+    """Print a final pipeline summary."""
+    click.echo(f"\n{'═' * 60}")
+    click.echo("  Pipeline Summary")
+    click.echo(f"{'═' * 60}")
+
+    skipped = sum(1 for r in pipeline_result.stage_results if "skipped" in r.message.lower())
+    failed = sum(1 for r in pipeline_result.stage_results if not r.success)
+    succeeded = sum(1 for r in pipeline_result.stage_results if r.success) - skipped
+
+    for r in pipeline_result.stage_results:
+        icon = "✓" if r.success else "✗"
+        if "skipped" in r.message.lower():
+            icon = "–"
+        line = f"  {icon} {r.stage_name}"
+        if r.message:
+            line += f": {r.message}"
+        click.echo(line)
+
+    click.echo(f"\n  Total: {succeeded} succeeded, {failed} failed, {skipped} skipped")
+    click.echo(f"  Duration: {_format_duration(total_elapsed)}")
+
+    if pipeline_result.db_path:
+        click.echo(f"  CodeQL DB: {pipeline_result.db_path}")
+    if pipeline_result.fuzz_targets_dir:
+        click.echo(f"  Harnesses: {pipeline_result.fuzz_targets_dir}")
+    if pipeline_result.binaries_dir:
+        click.echo(f"  Binaries: {pipeline_result.binaries_dir}")
+    if pipeline_result.fuzz_results:
+        total_crashes = sum(len(r.crashes) for r in pipeline_result.fuzz_results)
+        click.echo(f"  Crashes found: {total_crashes}")
+
+    overall = "SUCCESS" if pipeline_result.success else "FAILED"
+    click.echo(f"\n  Result: {overall}")
+    click.echo(f"{'═' * 60}")
+
+
+@main.command()
+@click.option(
+    "--repo",
+    "repo_path",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Repository or project path.",
+)
+@click.option("--language", default="cpp", help="Language for analysis (default: cpp).")
+@click.option(
+    "--stages",
+    "stages_list",
+    default=None,
+    help="Comma-separated list of stages to run (default: all from config).",
+)
+@click.option(
+    "--skip",
+    "skip_stages",
+    default=None,
+    help="Comma-separated list of stages to skip.",
+)
+@click.option("--no-stop-on-failure", is_flag=True, help="Continue pipeline after a stage fails.")
+@click.option("--no-llm", is_flag=True, help="Disable LLM for all stages.")
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output.")
+@click.option("--output", "output_dir", type=click.Path(path_type=Path), help="Base output directory (default: <repo>).")
+def run(
+    repo_path: Path,
+    language: str,
+    stages_list: str | None,
+    skip_stages: str | None,
+    no_stop_on_failure: bool,
+    no_llm: bool,
+    verbose: bool,
+    output_dir: Path | None,
+) -> None:
+    """Run the full fuzzing pipeline (build → analyze → generate → fuzz-build → compile → fuzz → report)."""
+    config_mgr, registry = _load_env_and_plugins(project_root=repo_path.resolve())
+    cfg = config_mgr.config
+
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(name)s %(levelname)s: %(message)s")
+
+    # Resolve stages
+    if stages_list:
+        stages = [s.strip() for s in stages_list.split(",") if s.strip()]
+    else:
+        stages = list(cfg.pipeline.stages)
+
+    skip = []
+    if skip_stages:
+        skip = [s.strip() for s in skip_stages.split(",") if s.strip()]
+    skip.extend(cfg.pipeline.skip_stages)
+
+    stop_on_failure = not no_stop_on_failure and cfg.pipeline.stop_on_failure
+
+    repo = repo_path.resolve()
+    base_output = output_dir.resolve() if output_dir else repo
+
+    click.echo(f"FutagAssist v{__version__}")
+    click.echo(f"Repository: {repo}")
+    click.echo(f"Language: {language}")
+    click.echo(f"Stages: {' → '.join(stages)}")
+    if skip:
+        click.echo(f"Skipping: {', '.join(skip)}")
+    click.echo(f"LLM: {'disabled' if no_llm else cfg.llm_provider}")
+    click.echo(f"Fuzzer: {cfg.fuzzer_engine}")
+
+    # Build pipeline context with config for all stages
+    ctx = PipelineContext(
+        repo_path=repo,
+        language=language,
+        config={
+            "registry": registry,
+            "config_manager": config_mgr,
+            # Build stage
+            "build_overwrite": False,
+            "build_verbose": verbose,
+            # Fuzz build stage
+            "fuzz_build_verbose": verbose,
+            # Generate stage
+            "use_llm": not no_llm,
+            "validate": True,
+            "write_harnesses": True,
+            # Compile stage
+            "compile_use_llm": not no_llm,
+            # Fuzz stage
+            "fuzz_engine": cfg.fuzzer_engine,
+            "fuzz_max_total_time": cfg.fuzzer.max_total_time,
+            "fuzz_timeout": cfg.fuzzer.timeout,
+            "fuzz_fork": cfg.fuzzer.fork,
+            "fuzz_rss_limit_mb": cfg.fuzzer.rss_limit_mb,
+            "fuzz_coverage": True,
+            # Report stage
+            "report_output": str(base_output / "reports"),
+        },
+    )
+
+    # Run with stage-by-stage progress
+    total_start = time.time()
+    stage_timings: dict[str, float] = {}
+
+    # Manual stage-by-stage execution for progress reporting
+    for idx, stage_name in enumerate(stages, 1):
+        if stage_name in skip:
+            _print_stage_header(stage_name, idx, len(stages))
+            sr = StageResult(stage_name=stage_name, success=True, message="skipped (in skip_stages)")
+            ctx.stage_results.append(sr)
+            _print_stage_result(sr, 0.0)
+            continue
+
+        try:
+            stage = registry.get_stage(stage_name)
+        except Exception as e:
+            _print_stage_header(stage_name, idx, len(stages))
+            sr = StageResult(stage_name=stage_name, success=False, message=f"Stage not found: {e}")
+            ctx.stage_results.append(sr)
+            _print_stage_result(sr, 0.0)
+            if stop_on_failure:
+                break
+            continue
+
+        if getattr(stage, "can_skip", None) and stage.can_skip(ctx):
+            _print_stage_header(stage_name, idx, len(stages))
+            sr = StageResult(stage_name=stage_name, success=True, message="skipped (can_skip=True)")
+            ctx.stage_results.append(sr)
+            _print_stage_result(sr, 0.0)
+            continue
+
+        _print_stage_header(stage_name, idx, len(stages))
+        stage_start = time.time()
+        try:
+            result = stage.execute(ctx)
+        except Exception as e:
+            result = StageResult(stage_name=stage_name, success=False, message=str(e))
+            if stop_on_failure:
+                ctx.update(result)
+                elapsed = time.time() - stage_start
+                stage_timings[stage_name] = elapsed
+                _print_stage_result(result, elapsed)
+                break
+
+        ctx.update(result)
+        elapsed = time.time() - stage_start
+        stage_timings[stage_name] = elapsed
+        _print_stage_result(result, elapsed)
+
+        if stop_on_failure and not result.success:
+            break
+
+    total_elapsed = time.time() - total_start
+    pipeline_result = ctx.finalize()
+    _print_pipeline_summary(pipeline_result, total_elapsed)
+
+    if not pipeline_result.success:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
