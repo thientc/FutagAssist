@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from futagassist.core.schema import PipelineContext
-from futagassist.stages.fuzz_build_stage import FuzzBuildStage
+from futagassist.stages.fuzz_build_stage import FUZZ_BUILD_TIMEOUT, MAX_CAPTURE_CHARS, FuzzBuildStage
 
 
 def test_fuzz_build_stage_no_repo_path() -> None:
@@ -136,3 +136,20 @@ def test_fuzz_build_stage_log_file_created(tmp_path: Path) -> None:
     assert log_file.exists()
     content = log_file.read_text(encoding="utf-8")
     assert "Fuzz Build" in content or "fuzz_install_prefix" in content
+
+
+# ---------------------------------------------------------------------------
+# Named-constant sanity checks
+# ---------------------------------------------------------------------------
+
+
+class TestFuzzBuildConstants:
+    """Verify named constants are importable and have sensible values."""
+
+    def test_fuzz_build_timeout(self) -> None:
+        assert isinstance(FUZZ_BUILD_TIMEOUT, int)
+        assert FUZZ_BUILD_TIMEOUT > 0
+
+    def test_max_capture_chars(self) -> None:
+        assert isinstance(MAX_CAPTURE_CHARS, int)
+        assert MAX_CAPTURE_CHARS > 0

@@ -6,6 +6,7 @@ import hashlib
 import logging
 from pathlib import Path
 
+from futagassist.utils import get_registry_and_config, resolve_output_dir
 from futagassist.core.schema import (
     CoverageReport,
     CrashInfo,
@@ -56,14 +57,9 @@ class FuzzStage:
 
     def execute(self, context: PipelineContext) -> StageResult:
         """Fuzz each compiled binary and aggregate results."""
-        registry = context.config.get("registry")
-        config_manager = context.config.get("config_manager")
-        if not registry or not config_manager:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
-                message="registry or config_manager not set in context.config",
-            )
+        registry, config_manager, err = get_registry_and_config(context, self.name)
+        if err:
+            return err
 
         cfg = config_manager.config
         avail = registry.list_available()
@@ -103,14 +99,7 @@ class FuzzStage:
         collect_coverage = context.config.get("fuzz_coverage", True)
 
         # Results directory
-        results_dir = context.config.get("fuzz_results_dir")
-        if results_dir:
-            results_dir = Path(results_dir)
-        elif context.repo_path:
-            results_dir = Path(context.repo_path) / "fuzz_results"
-        else:
-            results_dir = Path.cwd() / "fuzz_results"
-        results_dir.mkdir(parents=True, exist_ok=True)
+        results_dir = resolve_output_dir(context, "fuzz_results_dir", "fuzz_results")
 
         all_results: list[FuzzResult] = []
         all_crashes: list[CrashInfo] = []

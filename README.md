@@ -44,7 +44,7 @@ FutagAssist can build a C/C++ (or Python) library and create a **CodeQL database
 
 - **CodeQL bundle** (**required**, not the standalone CLI) — includes the CLI and language packs (e.g. `codeql/cpp-all`). See [Installing the CodeQL Bundle](docs/BUILD_WITH_CODEQL.md#installing-the-codeql-bundle) for step-by-step instructions.
 - The library’s build dependencies installed (e.g. autotools, cmake, compilers)
-- Optional: LLM configured (see [Adding an LLM plugin](docs/LLM_PLUGINS.md); e.g. `.env` with `OPENAI_API_KEY` and `LLM_PROVIDER=openai`) for better build-step extraction and failure fixes
+- Optional: LLM configured (see [Adding an LLM plugin](docs/PLUGINS.md); e.g. `.env` with `OPENAI_API_KEY` and `LLM_PROVIDER=openai`) for better build-step extraction and failure fixes
 
 **Commands:**
 

@@ -17,7 +17,7 @@
 flowchart TB
     subgraph CLI [CLI Layer]
         cmd[cli.py]
-        pipeconf[pipeline.yaml]
+        pipeconf[default.yaml]
     end
 
     subgraph Framework [Framework Core]
@@ -247,58 +247,52 @@ FutagAssist/
 │   │   ├── build_stage.py
 │   │   ├── analyze_stage.py
 │   │   ├── generate_stage.py
-│   │   ├── fuzz_build_stage.py   # Future: instrumented library build (see docs/FUZZ_BUILD_STAGE.md)
+│   │   ├── fuzz_build_stage.py
 │   │   ├── compile_stage.py
 │   │   ├── fuzz_stage.py
 │   │   └── report_stage.py
 │   │
+│   ├── reporters/                  # Built-in reporters
+│   │   ├── __init__.py
+│   │   ├── json_reporter.py
+│   │   ├── sarif_reporter.py
+│   │   └── html_reporter.py
+│   │
 │   └── utils/                      # Shared utilities
-│       ├── __init__.py
-│       ├── subprocess_utils.py
-│       ├── llm_utils.py
-│       └── codeql_utils.py
+│       └── __init__.py
 │
 ├── plugins/                        # Plugin directory (auto-discovered)
 │   ├── llm/
 │   │   ├── openai_provider.py
 │   │   ├── ollama_provider.py
 │   │   └── anthropic_provider.py
-│   ├── fuzzers/
+│   ├── fuzzer/
 │   │   ├── libfuzzer_engine.py
 │   │   └── aflpp_engine.py
-│   ├── languages/
-│   │   ├── cpp_analyzer.py
-│   │   ├── python_analyzer.py
-│   │   └── go_analyzer.py
-│   └── reporters/
-│       ├── json_reporter.py
-│       ├── sarif_reporter.py
-│       └── svres_reporter.py
-│
-├── ql/                             # CodeQL queries (per language)
-│   ├── cpp/
-│   │   ├── FunctionSignatures.ql
-│   │   ├── FunctionUsageContext.ql
-│   │   └── PublicAPI.ql
-│   └── python/
-│       └── FunctionSignatures.ql
+│   └── cpp/                        # C/C++ language analyzer + CodeQL queries
+│       ├── cpp_analyzer.py
+│       ├── list_functions.ql
+│       ├── api_functions.ql
+│       ├── fuzz_targets.ql
+│       ├── parameter_semantics.ql
+│       ├── function_calls.ql
+│       ├── init_cleanup_pairs.ql
+│       ├── includes.ql
+│       ├── function_details.ql
+│       └── qlpack.yml
 │
 ├── config/
 │   ├── default.yaml                # Default configuration
-│   ├── pipeline.yaml               # Pipeline stage configuration
 │   └── libs_projects.yaml          # Curated test projects
 │
-├── tests/
-│   ├── test_registry.py
-│   ├── test_pipeline.py
-│   ├── test_plugin_loader.py
-│   ├── test_stages/
-│   └── test_plugins/
+├── tests/                          # Test suite (26 files, 383 tests)
 │
-├── docs/
+├── docs/                           # Documentation
 │   ├── ARCHITECTURE.md
-│   ├── plugins.md                  # How to write plugins
-│   └── configuration.md
+│   ├── CONFIGURATION.md
+│   ├── QUICKSTART.md
+│   ├── PLUGINS.md
+│   └── ...                         # Per-stage docs
 │
 ├── pyproject.toml
 ├── Makefile
@@ -339,7 +333,7 @@ pipeline:
     - build
     - analyze
     - generate
-    # - fuzz_build   # Future: add when implementing compile/fuzz; rebuilds library with debug + sanitizers (see FUZZ_BUILD_STAGE.md)
+    - fuzz_build
     - compile
     - fuzz
     - report
@@ -351,13 +345,13 @@ pipeline:
 
 ```bash
 # Skip specific stages
-futagassist run --repo <url> --skip build --skip compile
+futagassist run --repo /path/to/project --skip fuzz_build,fuzz
 
 # Only run specific stages
-futagassist run --repo <url> --only analyze,generate
+futagassist run --repo /path/to/project --stages build,analyze,generate
 
-# Override component selection
-futagassist run --repo <url> --llm ollama --fuzzer aflpp --language python
+# Disable LLM
+futagassist run --repo /path/to/project --no-llm
 ```
 
 ---
@@ -655,7 +649,7 @@ def register(registry: ComponentRegistry):
 ### Adding a New Fuzzer Engine
 
 ```python
-# plugins/fuzzers/honggfuzz_engine.py
+# plugins/fuzzer/honggfuzz_engine.py
 from futagassist.protocols import FuzzerEngine
 
 class HonggfuzzEngine:
@@ -678,7 +672,7 @@ def register(registry: ComponentRegistry):
 ### Adding a New Language
 
 ```python
-# plugins/languages/rust_analyzer.py
+# plugins/rust/rust_analyzer.py
 from futagassist.protocols import LanguageAnalyzer
 
 class RustAnalyzer:

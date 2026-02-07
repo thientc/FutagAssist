@@ -219,3 +219,4 @@ uv.lock
 prereqs/*.tar.gz
 output/**/
 output/*
+reports/

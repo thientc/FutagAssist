@@ -21,7 +21,7 @@ This guide describes the **Analysis** pipeline stage: extracting function inform
    - Run `futagassist plugins list` to see registered **Language analyzers**.
 
 3. **Optional: LLM**
-   - For extra usage context suggestions, configure an LLM (same as build: `OPENAI_API_KEY` / `LLM_PROVIDER` in `.env`). See [LLM_PLUGINS.md](LLM_PLUGINS.md) or the build doc. When configured, the analyze stage may ask the LLM to suggest additional usage contexts after LanguageAnalyzer extraction.
+   - For extra usage context suggestions, configure an LLM (same as build: `OPENAI_API_KEY` / `LLM_PROVIDER` in `.env`). See [PLUGINS.md](PLUGINS.md) or the build doc. When configured, the analyze stage may ask the LLM to suggest additional usage contexts after LanguageAnalyzer extraction.
 
 4. **Optional: JSON output**
    - The built-in **JSON** reporter is registered by default. Use `--output <path>` to write a single JSON file containing both `functions` and `usage_contexts`.

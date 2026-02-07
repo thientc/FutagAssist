@@ -6,7 +6,6 @@
   - Validate network location
   - Check for dangerous patterns (file://, javascript:, etc.)
   - Maximum URL length: 2048 characters
-- **Reference**: `orchestrator/utils.py` - `SecurityTargetValidator` class
 - **Usage**: Always validate user input before processing
 
 ## Subprocess Safety

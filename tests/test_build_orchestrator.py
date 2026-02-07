@@ -8,6 +8,12 @@ from unittest.mock import patch
 import pytest
 
 from futagassist.build.build_orchestrator import (
+    AUX_COMMAND_TIMEOUT,
+    BUILD_TIMEOUT,
+    MAX_LLM_ERROR_CHARS,
+    MAX_LOG_ERROR_CHARS,
+    MAX_LOG_PROMPT_CHARS,
+    MAX_LOG_STDERR_CHARS,
     BuildOrchestrator,
     _condense_error_for_llm,
     _inject_configure_options,
@@ -366,3 +372,42 @@ def test_build_orchestrator_configure_options_in_script(tmp_path: Path) -> None:
     assert success is True
     assert len(captured_cmd) == 1
     assert "./configure" in captured_cmd[0] and "--without-ssl" in captured_cmd[0]
+
+
+# ---------------------------------------------------------------------------
+# Named-constant sanity checks
+# ---------------------------------------------------------------------------
+
+
+class TestBuildOrchestratorConstants:
+    """Verify named constants are importable and have sensible values."""
+
+    def test_build_timeout(self) -> None:
+        assert isinstance(BUILD_TIMEOUT, int)
+        assert BUILD_TIMEOUT > 0
+
+    def test_aux_command_timeout(self) -> None:
+        assert isinstance(AUX_COMMAND_TIMEOUT, int)
+        assert AUX_COMMAND_TIMEOUT > 0
+
+    def test_max_llm_error_chars(self) -> None:
+        assert isinstance(MAX_LLM_ERROR_CHARS, int)
+        assert MAX_LLM_ERROR_CHARS > 0
+
+    def test_max_log_error_chars(self) -> None:
+        assert isinstance(MAX_LOG_ERROR_CHARS, int)
+        assert MAX_LOG_ERROR_CHARS > 0
+
+    def test_max_log_stderr_chars(self) -> None:
+        assert isinstance(MAX_LOG_STDERR_CHARS, int)
+        assert MAX_LOG_STDERR_CHARS > 0
+
+    def test_max_log_prompt_chars(self) -> None:
+        assert isinstance(MAX_LOG_PROMPT_CHARS, int)
+        assert MAX_LOG_PROMPT_CHARS > 0
+
+    def test_condense_uses_max_llm_error_chars_by_default(self) -> None:
+        """The default max_chars parameter should equal MAX_LLM_ERROR_CHARS."""
+        import inspect
+        sig = inspect.signature(_condense_error_for_llm)
+        assert sig.parameters["max_chars"].default == MAX_LLM_ERROR_CHARS

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from futagassist.core.schema import GeneratedHarness, PipelineContext, StageResult
 from futagassist.generation.harness_generator import HarnessGenerator
+from futagassist.utils import get_llm_provider, get_registry_and_config, resolve_output_dir
 from futagassist.generation.syntax_validator import SyntaxValidator
 
 log = logging.getLogger(__name__)
@@ -28,37 +29,25 @@ class GenerateStage:
                 message="No functions in context (run analyze stage first).",
             )
 
-        registry = context.config.get("registry")
-        config_manager = context.config.get("config_manager")
-        if not registry or not config_manager:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
-                message="registry or config_manager not set in context.config",
-            )
+        registry, config_manager, err = get_registry_and_config(context, self.name)
+        if err:
+            return err
 
         cfg = config_manager.config
         avail = registry.list_available()
 
         # Get output directory
-        output_dir = context.config.get("generate_output")
-        if output_dir:
-            output_dir = Path(output_dir)
-        elif context.repo_path:
-            output_dir = context.repo_path / "fuzz_targets"
-        else:
-            output_dir = Path.cwd() / "fuzz_targets"
+        output_dir = resolve_output_dir(context, "generate_output", "fuzz_targets", mkdir=False)
 
         # Get LLM if configured
         llm = None
         use_llm = context.config.get("use_llm", True)
         if use_llm:
-            try:
-                if cfg.llm_provider in avail.get("llm_providers", []):
-                    llm = registry.get_llm(cfg.llm_provider, **config_manager.env)
-                    log.info("Using LLM provider: %s", cfg.llm_provider)
-            except Exception as e:
-                log.warning("Failed to initialize LLM: %s", e)
+            llm = get_llm_provider(registry, config_manager, avail=avail)
+            if llm:
+                log.info("Using LLM provider: %s", cfg.llm_provider)
+            else:
+                log.warning("Failed to initialize LLM")
 
         # Get max targets from config
         max_targets = context.config.get("max_targets")

@@ -4,8 +4,8 @@ This document describes the **Fuzz Build** (instrumentation) stage for FutagAssi
 
 ## Purpose
 
-- **Build stage** (current): Produces a CodeQL database only; it does not install the library. No debug/sanitizer flags.
-- **Fuzz Build stage** (planned): Builds the library with **debug symbols** and **sanitizers** (AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer) and installs to a **fuzz-specific** prefix (e.g. `<repo>/install-fuzz`). The compile stage will link fuzz targets against this instrumented install so that crashes in library code have readable stack traces and sanitizers can detect bugs inside the library.
+- **Build stage**: Produces a CodeQL database only; it does not install the library. No debug/sanitizer flags.
+- **Fuzz Build stage**: Builds the library with **debug symbols** and **sanitizers** (AddressSanitizer, UndefinedBehaviorSanitizer, LeakSanitizer) and installs to a **fuzz-specific** prefix (e.g. `<repo>/install-fuzz`). The compile stage links fuzz targets against this instrumented install so that crashes in library code have readable stack traces and sanitizers can detect bugs inside the library.
 
 CodeQL does not require install or sanitizers; fuzzing requires an instrumented install. Keeping install in a separate Fuzz Build stage reduces build time and complexity for CodeQL-only runs.
 
@@ -13,23 +13,13 @@ CodeQL does not require install or sanitizers; fuzzing requires an instrumented 
 
 - **Depends on:** `build`
 - **Order:** `build` → `analyze` → `generate` → **`fuzz_build`** → `compile` → `fuzz` → `report`
-- When implemented, add `fuzz_build` to `config/default.yaml` (or `pipeline.yaml`) between `generate` and `compile`.
+- Configured in `config/default.yaml` between `generate` and `compile`.
 
 ```mermaid
 flowchart LR
-    subgraph existing [Current]
-        Build[BuildStage]
-        Analyze[AnalyzeStage]
-        Generate[GenerateStage]
-    end
-    subgraph planned [Planned]
-        FuzzBuild[FuzzBuildStage]
-    end
-    subgraph later [Later stages]
-        Compile[CompileStage]
-        Fuzz[FuzzStage]
-    end
-    Build --> Analyze --> Generate --> FuzzBuild --> Compile --> Fuzz
+    Build[BuildStage] --> Analyze[AnalyzeStage] --> Generate[GenerateStage]
+    Generate --> FuzzBuild[FuzzBuildStage] --> Compile[CompileStage]
+    Compile --> Fuzz[FuzzStage] --> Report[ReportStage]
     FuzzBuild -.->|fuzz_install_prefix| Compile
 ```
 

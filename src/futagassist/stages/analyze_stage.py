@@ -8,6 +8,7 @@ from pathlib import Path
 from futagassist.analysis.context_builder import enrich_functions
 from futagassist.analysis.llm_analyze import suggest_usage_contexts
 from futagassist.core.schema import PipelineContext, StageResult
+from futagassist.utils import get_llm_provider, get_registry_and_config
 
 log = logging.getLogger(__name__)
 
@@ -28,14 +29,9 @@ class AnalyzeStage:
                 message="db_path not set in context (run build stage first or pass --db).",
             )
 
-        registry = context.config.get("registry")
-        config_manager = context.config.get("config_manager")
-        if not registry or not config_manager:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
-                message="registry or config_manager not set in context.config",
-            )
+        registry, config_manager, err = get_registry_and_config(context, self.name)
+        if err:
+            return err
 
         cfg = config_manager.config
         language = context.language or cfg.language
@@ -63,12 +59,7 @@ class AnalyzeStage:
         if context.repo_path and functions:
             functions = enrich_functions(functions, context.repo_path)
 
-        llm = None
-        try:
-            if cfg.llm_provider in avail.get("llm_providers", []):
-                llm = registry.get_llm(cfg.llm_provider, **config_manager.env)
-        except Exception:
-            pass
+        llm = get_llm_provider(registry, config_manager, avail=avail)
 
         if llm and functions:
             extra = suggest_usage_contexts(

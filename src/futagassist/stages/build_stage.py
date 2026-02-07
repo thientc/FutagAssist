@@ -8,6 +8,7 @@ from futagassist.build.build_log import build_log_context
 from futagassist.build.build_orchestrator import BuildOrchestrator
 from futagassist.build.readme_analyzer import ReadmeAnalyzer
 from futagassist.core.schema import PipelineContext, StageResult
+from futagassist.utils import get_llm_provider, get_registry_and_config
 
 
 class BuildStage:
@@ -26,14 +27,9 @@ class BuildStage:
                 message="repo_path not set in context",
             )
 
-        registry = context.config.get("registry")
-        config_manager = context.config.get("config_manager")
-        if not registry or not config_manager:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
-                message="registry or config_manager not set in context.config",
-            )
+        registry, config_manager, err = get_registry_and_config(context, self.name)
+        if err:
+            return err
 
         cfg = config_manager.config
         language = context.language or cfg.language
@@ -41,12 +37,7 @@ class BuildStage:
         if cfg.codeql_home:
             codeql_bin = str(Path(cfg.codeql_home) / "bin" / "codeql")
 
-        llm = None
-        try:
-            if cfg.llm_provider in registry.list_available().get("llm_providers", []):
-                llm = registry.get_llm(cfg.llm_provider, **config_manager.env)
-        except Exception:
-            pass
+        llm = get_llm_provider(registry, config_manager)
 
         log_file = context.config.get("build_log_file")
         if log_file is None:

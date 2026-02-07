@@ -13,7 +13,7 @@ import click
 
 from futagassist import __version__
 from futagassist.core.config import ConfigManager
-from futagassist.core.health import HealthChecker, HealthCheckResult
+from futagassist.core.health import HealthChecker
 from futagassist.core.plugin_loader import PluginLoader
 from futagassist.core.registry import ComponentRegistry
 from futagassist.core.schema import FunctionInfo, PipelineContext, PipelineResult, StageResult, UsageContext

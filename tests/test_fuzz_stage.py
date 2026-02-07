@@ -9,6 +9,8 @@ import pytest
 
 from futagassist.core.config import ConfigManager
 from futagassist.core.registry import ComponentRegistry
+
+from _helpers import make_config_manager
 from futagassist.core.schema import (
     CoverageReport,
     CrashInfo,
@@ -24,12 +26,7 @@ from futagassist.stages.fuzz_stage import FuzzStage, _deduplicate_crashes
 # ---------------------------------------------------------------------------
 
 
-def _make_config_manager(tmp_path: Path) -> ConfigManager:
-    mgr = ConfigManager(project_root=tmp_path)
-    mgr._config_path = tmp_path / "nonexistent.yaml"
-    mgr._env_path = tmp_path / ".env"
-    mgr.load()
-    return mgr
+_make_config_manager = make_config_manager
 
 
 class _MockFuzzerEngine:

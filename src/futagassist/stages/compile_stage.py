@@ -9,8 +9,28 @@ import time
 from pathlib import Path
 
 from futagassist.core.schema import GeneratedHarness, PipelineContext, StageResult
+from futagassist.utils import get_llm_provider, get_registry_and_config, resolve_output_dir
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Named constants (avoid magic numbers)
+# ---------------------------------------------------------------------------
+
+#: Maximum number of compiler error lines kept when building the LLM prompt.
+MAX_COMPILER_ERROR_LINES = 10
+
+#: Upper bound (seconds) for the exponential-backoff delay between retries.
+MAX_BACKOFF_SECONDS = 30
+
+#: Default per-harness compilation timeout (seconds).
+DEFAULT_COMPILE_TIMEOUT = 120
+
+#: Maximum characters of compiler error output sent to the LLM.
+MAX_ERROR_OUTPUT_CHARS = 4000
+
+#: Maximum characters of harness source code sent to the LLM.
+MAX_SOURCE_CODE_CHARS = 8000
 
 # Default flags when no LanguageAnalyzer is available or for C/C++ harnesses.
 DEFAULT_COMPILE_FLAGS = [
@@ -50,7 +70,7 @@ def _parse_compiler_errors(stderr: str) -> list[str]:
     for line in stderr.splitlines():
         if "error:" in line.lower() or "fatal error:" in line.lower():
             errors.append(line.strip())
-    return errors[:10]  # cap to keep prompt short
+    return errors[:MAX_COMPILER_ERROR_LINES]  # cap to keep prompt short
 
 
 class CompileStage:
@@ -85,27 +105,15 @@ class CompileStage:
                 message=f"No valid harnesses to compile ({len(harnesses)} total, 0 valid with source).",
             )
 
-        registry = context.config.get("registry")
-        config_manager = context.config.get("config_manager")
-        if not registry or not config_manager:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
-                message="registry or config_manager not set in context.config",
-            )
+        registry, config_manager, err = get_registry_and_config(context, self.name)
+        if err:
+            return err
 
         cfg = config_manager.config
         avail = registry.list_available()
 
         # Resolve output directory for binaries
-        binaries_dir = context.config.get("compile_output")
-        if binaries_dir:
-            binaries_dir = Path(binaries_dir)
-        elif context.repo_path:
-            binaries_dir = Path(context.repo_path) / "fuzz_binaries"
-        else:
-            binaries_dir = Path.cwd() / "fuzz_binaries"
-        binaries_dir.mkdir(parents=True, exist_ok=True)
+        binaries_dir = resolve_output_dir(context, "compile_output", "fuzz_binaries")
 
         # Get compiler flags from language analyzer
         language = context.language or cfg.language
@@ -124,16 +132,15 @@ class CompileStage:
         llm = None
         use_llm = context.config.get("compile_use_llm", True)
         if use_llm:
-            try:
-                if cfg.llm_provider in avail.get("llm_providers", []):
-                    llm = registry.get_llm(cfg.llm_provider, **config_manager.env)
-                    log.info("LLM available for compile-error fixing: %s", cfg.llm_provider)
-            except Exception as e:
-                log.warning("Failed to initialize LLM for compile fixes: %s", e)
+            llm = get_llm_provider(registry, config_manager, avail=avail)
+            if llm:
+                log.info("LLM available for compile-error fixing: %s", cfg.llm_provider)
+            else:
+                log.warning("Failed to initialize LLM for compile fixes")
 
         max_retries = context.config.get("compile_max_retries", cfg.llm.max_retries)
         compiler = context.config.get("compile_compiler", "clang++")
-        timeout = context.config.get("compile_timeout", 120)
+        timeout = context.config.get("compile_timeout", DEFAULT_COMPILE_TIMEOUT)
 
         # Build link flags from fuzz_install_prefix
         link_flags: list[str] = []
@@ -251,7 +258,7 @@ class CompileStage:
 
         current_source = harness.source_code
         for attempt in range(max_retries):
-            backoff = min(2 ** attempt, 30)
+            backoff = min(2 ** attempt, MAX_BACKOFF_SECONDS)
             log.info(
                 "Retry %d/%d for %s (backoff %ds)",
                 attempt + 1, max_retries, harness.function_name, backoff,
@@ -333,8 +340,8 @@ class CompileStage:
         prompt = COMPILE_FIX_PROMPT.format(
             compile_cmd=compile_cmd,
             source_file=source_file,
-            error_output=error_output[:4000],
-            source_code=source_code[:8000],
+            error_output=error_output[:MAX_ERROR_OUTPUT_CHARS],
+            source_code=source_code[:MAX_SOURCE_CODE_CHARS],
         )
         try:
             response = llm.complete(prompt).strip()  # type: ignore[union-attr]

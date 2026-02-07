@@ -11,30 +11,16 @@ from futagassist.core.registry import ComponentRegistry
 from futagassist.core.schema import CoverageReport, CrashInfo, FunctionInfo
 from futagassist.reporters import register_builtin_reporters
 
+from _helpers import make_sample_coverage as _sample_coverage
+from _helpers import make_sample_crashes as _sample_crashes
+
 
 def _sample_functions() -> list[FunctionInfo]:
+    """Local sample functions — reporter tests assert on these exact names."""
     return [
         FunctionInfo(name="foo", signature="int foo(int x)", file_path="src/foo.c", line=10, is_api=True),
         FunctionInfo(name="bar", signature="void bar()", file_path="src/bar.c", line=20, is_fuzz_target_candidate=True),
     ]
-
-
-def _sample_crashes() -> list[CrashInfo]:
-    return [
-        CrashInfo(crash_file="src/foo.c", crash_line=42, warn_class="ASAN", summary="heap-buffer-overflow"),
-        CrashInfo(artifact_path="/tmp/crash-abc", warn_class="CRASH", summary="unknown crash"),
-    ]
-
-
-def _sample_coverage() -> CoverageReport:
-    return CoverageReport(
-        binary_path="/bin/fuzz_foo",
-        profdata_path="/tmp/default.profdata",
-        lines_covered=50,
-        lines_total=100,
-        regions_covered=30,
-        regions_total=60,
-    )
 
 
 # ---------------------------------------------------------------------------

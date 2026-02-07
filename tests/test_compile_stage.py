@@ -10,8 +10,15 @@ import pytest
 from futagassist.core.config import AppConfig, ConfigManager
 from futagassist.core.registry import ComponentRegistry
 from futagassist.core.schema import GeneratedHarness, PipelineContext, StageResult
+
+from _helpers import make_config_manager, make_sample_harness
 from futagassist.stages.compile_stage import (
     DEFAULT_COMPILE_FLAGS,
+    DEFAULT_COMPILE_TIMEOUT,
+    MAX_BACKOFF_SECONDS,
+    MAX_COMPILER_ERROR_LINES,
+    MAX_ERROR_OUTPUT_CHARS,
+    MAX_SOURCE_CODE_CHARS,
     CompileStage,
     _binary_name,
     _parse_compiler_errors,
@@ -23,28 +30,9 @@ from futagassist.stages.compile_stage import (
 # ---------------------------------------------------------------------------
 
 
-def _make_harness(name: str = "foo", valid: bool = True, source: str = "") -> GeneratedHarness:
-    """Create a test harness with minimal source."""
-    code = source or (
-        '#include <stdint.h>\n'
-        'extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {\n'
-        '    return 0;\n'
-        '}\n'
-    )
-    return GeneratedHarness(
-        function_name=name,
-        file_path=f"fuzz_targets/harness_{name}.cpp",
-        source_code=code,
-        is_valid=valid,
-    )
-
-
-def _make_config_manager(tmp_path: Path) -> ConfigManager:
-    mgr = ConfigManager(project_root=tmp_path)
-    mgr._config_path = tmp_path / "nonexistent.yaml"
-    mgr._env_path = tmp_path / ".env"
-    mgr.load()
-    return mgr
+# Aliases for backward compatibility with existing test code.
+_make_harness = make_sample_harness
+_make_config_manager = make_config_manager
 
 
 def _make_context(
@@ -605,3 +593,38 @@ class TestCompileCLI:
 
         assert result.exit_code == 0
         assert "Compiled" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Named-constant sanity checks
+# ---------------------------------------------------------------------------
+
+
+class TestCompileStageConstants:
+    """Verify named constants are importable and have sensible values."""
+
+    def test_max_compiler_error_lines(self) -> None:
+        assert isinstance(MAX_COMPILER_ERROR_LINES, int)
+        assert MAX_COMPILER_ERROR_LINES > 0
+
+    def test_max_backoff_seconds(self) -> None:
+        assert isinstance(MAX_BACKOFF_SECONDS, int)
+        assert MAX_BACKOFF_SECONDS > 0
+
+    def test_default_compile_timeout(self) -> None:
+        assert isinstance(DEFAULT_COMPILE_TIMEOUT, int)
+        assert DEFAULT_COMPILE_TIMEOUT > 0
+
+    def test_max_error_output_chars(self) -> None:
+        assert isinstance(MAX_ERROR_OUTPUT_CHARS, int)
+        assert MAX_ERROR_OUTPUT_CHARS > 0
+
+    def test_max_source_code_chars(self) -> None:
+        assert isinstance(MAX_SOURCE_CODE_CHARS, int)
+        assert MAX_SOURCE_CODE_CHARS > 0
+
+    def test_parse_compiler_errors_respects_cap(self) -> None:
+        """_parse_compiler_errors should cap results at MAX_COMPILER_ERROR_LINES."""
+        lines = "\n".join(f"file.cpp:1: error: problem {i}" for i in range(50))
+        errors = _parse_compiler_errors(lines)
+        assert len(errors) == MAX_COMPILER_ERROR_LINES

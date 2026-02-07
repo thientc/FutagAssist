@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from futagassist.utils import get_registry_and_config, resolve_output_dir
 from futagassist.core.schema import (
     CoverageReport,
     CrashInfo,
@@ -33,14 +34,9 @@ class ReportStage:
 
     def execute(self, context: PipelineContext) -> StageResult:
         """Generate reports from pipeline context."""
-        registry = context.config.get("registry")
-        config_manager = context.config.get("config_manager")
-        if not registry or not config_manager:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
-                message="registry or config_manager not set in context.config",
-            )
+        registry, config_manager, err = get_registry_and_config(context, self.name)
+        if err:
+            return err
 
         avail = registry.list_available()
         available_reporters = avail.get("reporters", [])
@@ -69,16 +65,9 @@ class ReportStage:
             )
 
         # Output directory
-        output_dir = context.config.get("report_output")
-        if output_dir:
-            output_dir = Path(output_dir)
-        elif context.results_dir:
-            output_dir = Path(context.results_dir) / "reports"
-        elif context.repo_path:
-            output_dir = Path(context.repo_path) / "reports"
-        else:
-            output_dir = Path.cwd() / "reports"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = resolve_output_dir(
+            context, "report_output", "reports", fallback_attr="results_dir",
+        )
 
         # Gather data from context
         functions = context.functions

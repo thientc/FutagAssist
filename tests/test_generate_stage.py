@@ -13,10 +13,15 @@ from futagassist.core.schema import (
 )
 from futagassist.stages.generate_stage import GenerateStage
 
+# mock_registry and mock_config_manager are provided by conftest.py.
+# sample_functions is provided by conftest.py.
+# The generate-stage tests need a registry with llm_providers=[] (no LLM)
+# and a config_manager with env={}, so we override the conftest defaults below.
+
 
 @pytest.fixture
 def mock_registry():
-    """Create a mock registry."""
+    """Create a mock registry with no LLM providers (generate-stage specific)."""
     registry = MagicMock()
     registry.list_available.return_value = {
         "stages": ["generate"],
@@ -29,35 +34,12 @@ def mock_registry():
 
 @pytest.fixture
 def mock_config_manager():
-    """Create a mock config manager."""
+    """Create a mock config manager with empty env (generate-stage specific)."""
     config_manager = MagicMock()
     config_manager.config.language = "cpp"
     config_manager.config.llm_provider = "openai"
     config_manager.env = {}
     return config_manager
-
-
-@pytest.fixture
-def sample_functions():
-    """Create sample function info for testing."""
-    return [
-        FunctionInfo(
-            name="parse_data",
-            signature="int parse_data(const char* data, size_t size)",
-            return_type="int",
-            parameters=["const char* data", "size_t size"],
-            file_path="parser.c",
-            line=42,
-        ),
-        FunctionInfo(
-            name="process_buffer",
-            signature="void process_buffer(uint8_t* buf, int len)",
-            return_type="void",
-            parameters=["uint8_t* buf", "int len"],
-            file_path="processor.c",
-            line=100,
-        ),
-    ]
 
 
 class TestGenerateStage:

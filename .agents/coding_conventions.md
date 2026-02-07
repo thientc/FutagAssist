@@ -22,11 +22,10 @@
   ```
 
 ## Async/Await Patterns
-- Use `asyncio` for asynchronous operations, especially MCP communication
+- Use `asyncio` for asynchronous operations where applicable
 - Use `async def` for async functions, `await` for async calls
 - Prefer `asyncio.create_subprocess_exec()` over `subprocess.run()` for async subprocess calls
 - Handle async context managers properly with `async with`
-- Reference: `orchestrator/mcp_client.py` for async MCP patterns
 
 ## Dataclass Usage
 - Use `@dataclass(frozen=True)` for immutable configuration objects
@@ -41,7 +40,7 @@
       mode: str
       reasoner: str
   ```
-- Reference: `orchestrator/config.py` for dataclass patterns
+- Reference: `src/futagassist/core/config.py` for dataclass and Pydantic model patterns
 
 ## Import Organization
 - Organize imports in this order:
@@ -82,20 +81,21 @@
   ```
 
 ## Error Handling
-- Use structured error returns from MCP tools (dictionaries with error keys)
-- Use custom exception types in `core/` directories for domain-specific errors
+- Use the custom exception hierarchy in `src/futagassist/core/exceptions.py` for domain-specific errors
 - Always handle exceptions explicitly; avoid bare `except:` clauses
-- Return error information in a consistent format:
+- Return structured results via `StageResult` from pipeline stages:
   ```python
-  return {"error": "Description", "server": "server_name", "tool": "tool_name"}
+  return StageResult(stage_name=self.name, success=False, message="Description")
   ```
 
 ## Code Organization
-- Follow the modular MCP server structure:
-  - `server.py` - MCP server entry point, tool registration
-  - `core/` - Core utilities, error types, validation
-  - `lib/` - Shared libraries (payloads, outputs, wordlists)
-  - `tools/` - Individual tool implementations
+- Follow the modular plugin-based architecture:
+  - `src/futagassist/cli.py` - Click CLI entry point
+  - `src/futagassist/core/` - Framework core (registry, pipeline, config, schema, exceptions)
+  - `src/futagassist/protocols/` - Abstract Protocol interfaces
+  - `src/futagassist/stages/` - Built-in pipeline stages
+  - `src/futagassist/reporters/` - Built-in reporter plugins
+  - `plugins/` - Auto-discovered external plugins (LLM, fuzzer, language)
 - Keep related functionality together
 - Separate concerns: one module per responsibility
 
@@ -104,10 +104,9 @@
 - **Rationale**: Large files are harder to maintain, test, and understand
 - **When a file exceeds the limit**:
   - Refactor by splitting into smaller modules
-  - Extract classes/functions to separate files in appropriate directories (core/, lib/, tools/)
+  - Extract classes/functions to separate files in appropriate directories (core/, stages/, utils/)
   - Use the existing modular architecture patterns
 - **Examples**:
-  - ✅ Good: Multiple focused files under 1000 lines each
-  - ❌ Bad: Single file with 1010+ lines (must be refactored)
-- **Current violations**: `mcp-servers/webrecon-mcp/tools/crawlers/zap_crawler.py` (1010 lines) needs refactoring
+  - Good: Multiple focused files under 1000 lines each
+  - Bad: Single file with 1010+ lines (must be refactored)
 

@@ -1,6 +1,6 @@
 # AI Coding Agent Instructions
 
-This document provides comprehensive guidelines for AI coding agents working on the AutoRed MCP project. The documentation is organized into focused sections for easier navigation and maintenance.
+This document provides comprehensive guidelines for AI coding agents working on the FutagAssist project. The documentation is organized into focused sections for easier navigation and maintenance.
 
 ## Quick Navigation
 

@@ -13,6 +13,28 @@ from futagassist.build.codeql_injector import build_command_to_shell, codeql_dat
 from futagassist.build.readme_analyzer import ReadmeAnalyzer
 
 
+# ---------------------------------------------------------------------------
+# Named constants (avoid magic numbers)
+# ---------------------------------------------------------------------------
+
+#: Timeout (seconds) for the CodeQL build subprocess.
+BUILD_TIMEOUT = 600
+
+#: Timeout (seconds) for clean and fix commands.
+AUX_COMMAND_TIMEOUT = 120
+
+#: Max characters of error output sent to the LLM for fix suggestions.
+MAX_LLM_ERROR_CHARS = 4000
+
+#: Max characters of error output included in failure log messages.
+MAX_LOG_ERROR_CHARS = 3000
+
+#: Max characters of stderr shown in log warnings for auxiliary commands.
+MAX_LOG_STDERR_CHARS = 500
+
+#: Max characters of LLM prompt shown in debug logging.
+MAX_LOG_PROMPT_CHARS = 2500
+
 FIX_PROMPT = """The build failed with the following output. Suggest a single shell command to fix the environment, to be run from the project root.
 
 Rules:
@@ -42,7 +64,7 @@ def _strip_log_envelope(line: str) -> str:
     return _RE_LOG_PREFIX.sub("", line).strip()
 
 
-def _condense_error_for_llm(error_output: str, max_chars: int = 4000) -> str:
+def _condense_error_for_llm(error_output: str, max_chars: int = MAX_LLM_ERROR_CHARS) -> str:
     """
     Produce a short summary for the LLM: strip log envelope (datetime, build-stdout/stderr),
     keep only basic build context and actual error lines (error, fatal, not found, failed, etc.).
@@ -204,7 +226,7 @@ class BuildOrchestrator:
                         cwd=str(repo_path),
                         capture_output=True,
                         text=True,
-                        timeout=120,
+                        timeout=AUX_COMMAND_TIMEOUT,
                     )
                     if clean_result.returncode == 0:
                         log.info("Clean succeeded (exit 0)")
@@ -212,10 +234,10 @@ class BuildOrchestrator:
                         log.warning(
                             "Clean failed (exit %s); continuing with build. stderr: %s",
                             clean_result.returncode,
-                            (clean_result.stderr or clean_result.stdout or "")[:500],
+                            (clean_result.stderr or clean_result.stdout or "")[:MAX_LOG_STDERR_CHARS],
                         )
                 except subprocess.TimeoutExpired:
-                    log.warning("Clean timed out (120s); continuing with build")
+                    log.warning("Clean timed out (%ds); continuing with build", AUX_COMMAND_TIMEOUT)
                 except Exception as e:
                     log.warning("Clean failed: %s; continuing with build", e)
 
@@ -242,11 +264,11 @@ class BuildOrchestrator:
                         cwd=str(repo_path),
                         capture_output=True,
                         text=True,
-                        timeout=600,
+                        timeout=BUILD_TIMEOUT,
                     )
                 except subprocess.TimeoutExpired:
-                    log.error("Build timed out (600s)")
-                    return False, None, "Build timed out (600s)", None
+                    log.error("Build timed out (%ds)", BUILD_TIMEOUT)
+                    return False, None, f"Build timed out ({BUILD_TIMEOUT}s)", None
                 except FileNotFoundError:
                     log.error("CodeQL binary not found: %s", self._codeql_bin)
                     return False, None, f"CodeQL binary not found: {self._codeql_bin}", None
@@ -260,7 +282,7 @@ class BuildOrchestrator:
                     x.strip() for x in (result.stderr, result.stdout) if x and x.strip()
                 ).strip() or f"Exit code {result.returncode}"
                 log.warning("CodeQL build failed (exit %s)", result.returncode)
-                log.info("Error output:\n---\n%s\n---", error_output[:3000] + ("..." if len(error_output) > 3000 else ""))
+                log.info("Error output:\n---\n%s\n---", error_output[:MAX_LOG_ERROR_CHARS] + ("..." if len(error_output) > MAX_LOG_ERROR_CHARS else ""))
 
                 fix_cmd, llm_error = self._ask_llm_for_fix(full_build_cmd, error_output)
 
@@ -340,12 +362,12 @@ class BuildOrchestrator:
             return None, None
         try:
             # Send only condensed error: strip datetime/build-stdout/build-stderr, keep error lines and basic context
-            error_snippet = _condense_error_for_llm(error_output, max_chars=4000)
+            error_snippet = _condense_error_for_llm(error_output, max_chars=MAX_LLM_ERROR_CHARS)
             prompt = FIX_PROMPT.format(build_cmd=build_cmd, error_output=error_snippet)
             log.info("LLM fix: asking for fix command")
-            log.debug("LLM prompt (fix):\n%s", prompt[:2500] + ("..." if len(prompt) > 2500 else ""))
+            log.debug("LLM prompt (fix):\n%s", prompt[:MAX_LOG_PROMPT_CHARS] + ("..." if len(prompt) > MAX_LOG_PROMPT_CHARS else ""))
             out = self._llm.complete(prompt).strip().split("\n")[0].strip()
-            log.debug("LLM response (fix): %s", out[:500] if out else "(empty)")
+            log.debug("LLM response (fix): %s", out[:MAX_LOG_STDERR_CHARS] if out else "(empty)")
             if not out or out.lower() == "none":
                 log.info("LLM fix: suggestion = none")
                 return None, None
@@ -371,13 +393,13 @@ class BuildOrchestrator:
                 cwd=str(work_dir),
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=AUX_COMMAND_TIMEOUT,
             )
             ok = result.returncode == 0
             if ok:
                 log.info("Fix command succeeded (exit 0)")
             else:
-                log.warning("Fix command failed (exit %s): stderr=%s", result.returncode, (result.stderr or "")[:500])
+                log.warning("Fix command failed (exit %s): stderr=%s", result.returncode, (result.stderr or "")[:MAX_LOG_STDERR_CHARS])
             return ok
         except Exception as e:
             log.warning("Fix command failed: %s", e)

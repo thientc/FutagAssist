@@ -12,6 +12,16 @@ from futagassist.build.codeql_injector import build_command_to_shell
 from futagassist.build.readme_analyzer import ReadmeAnalyzer
 from futagassist.core.schema import PipelineContext, StageResult
 
+# ---------------------------------------------------------------------------
+# Named constants (avoid magic numbers)
+# ---------------------------------------------------------------------------
+
+#: Timeout (seconds) for the fuzz build subprocess.
+FUZZ_BUILD_TIMEOUT = 600
+
+#: Max characters of stderr/stdout captured in failure data.
+MAX_CAPTURE_CHARS = 8000
+
 FUZZ_CFLAGS = "-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer"
 FUZZ_CXXFLAGS = FUZZ_CFLAGS
 FUZZ_LDFLAGS = "-fsanitize=address,undefined -fno-omit-frame-pointer"
@@ -86,14 +96,14 @@ class FuzzBuildStage:
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=600,
+                    timeout=FUZZ_BUILD_TIMEOUT,
                 )
             except subprocess.TimeoutExpired:
-                log.warning("Fuzz build timed out (600s)")
+                log.warning("Fuzz build timed out (%ds)", FUZZ_BUILD_TIMEOUT)
                 return StageResult(
                     stage_name=self.name,
                     success=False,
-                    message="Fuzz build timed out (600s)",
+                    message=f"Fuzz build timed out ({FUZZ_BUILD_TIMEOUT}s)",
                     data={"fuzz_build_log_file": str(log_file)},
                 )
             except Exception as e:
@@ -115,8 +125,8 @@ class FuzzBuildStage:
                     message=f"Fuzz build failed (exit {result.returncode})",
                     data={
                         "fuzz_build_log_file": str(log_file),
-                        "stderr": (result.stderr or "")[:8000],
-                        "stdout": (result.stdout or "")[:8000],
+                        "stderr": (result.stderr or "")[:MAX_CAPTURE_CHARS],
+                        "stdout": (result.stdout or "")[:MAX_CAPTURE_CHARS],
                     },
                 )
 
